@@ -1,10 +1,13 @@
-"""Tool base class, registry, and OpenAI function schema generation."""
+"""Tool base class, registry, snapshot tracker, and OpenAI function schema generation."""
 
 from __future__ import annotations
 
 import json
+import os
+import shutil
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Optional
 
 
@@ -60,11 +63,74 @@ class Tool(ABC):
         }
 
 
+@dataclass
+class FileSnapshot:
+    """Records a file's state before modification for undo support."""
+    file_path: str
+    original_content: Optional[str]
+    existed: bool
+
+
+class SnapshotTracker:
+    """Tracks file modifications for /diff and /undo."""
+
+    def __init__(self) -> None:
+        self._snapshots: list[FileSnapshot] = []
+        self._modified_files: dict[str, str | None] = {}
+
+    def capture(self, file_path: str) -> None:
+        path = Path(file_path).expanduser().resolve()
+        key = str(path)
+        if key in self._modified_files:
+            return
+        if path.exists() and path.is_file():
+            content = path.read_text(encoding="utf-8", errors="replace")
+            self._snapshots.append(FileSnapshot(key, content, True))
+            self._modified_files[key] = content
+        else:
+            self._snapshots.append(FileSnapshot(key, None, False))
+            self._modified_files[key] = None
+
+    def undo_last(self) -> Optional[str]:
+        if not self._snapshots:
+            return None
+        snap = self._snapshots.pop()
+        path = Path(snap.file_path)
+        if snap.existed and snap.original_content is not None:
+            path.write_text(snap.original_content, encoding="utf-8")
+        elif not snap.existed and path.exists():
+            path.unlink()
+        self._modified_files.pop(snap.file_path, None)
+        return snap.file_path
+
+    def get_diffs(self) -> list[tuple[str, str | None, str | None]]:
+        """Returns list of (path, original, current) for modified files."""
+        results = []
+        for fpath, original in self._modified_files.items():
+            path = Path(fpath)
+            current = path.read_text(encoding="utf-8", errors="replace") if path.exists() else None
+            if original != current:
+                results.append((fpath, original, current))
+        return results
+
+    def clear(self) -> None:
+        self._snapshots.clear()
+        self._modified_files.clear()
+
+    @property
+    def has_changes(self) -> bool:
+        return any(
+            (Path(fp).read_text(encoding="utf-8", errors="replace") if Path(fp).exists() else None) != orig
+            for fp, orig in self._modified_files.items()
+        )
+
+
 class ToolRegistry:
     """Registry that holds all available tools."""
 
     def __init__(self) -> None:
         self._tools: dict[str, Tool] = {}
+        self.snapshots = SnapshotTracker()
 
     def register(self, tool: Tool) -> None:
         self._tools[tool.name] = tool
@@ -84,6 +150,10 @@ class ToolRegistry:
             return ToolResult.error(f"Tool not found: {name}")
         try:
             kwargs = json.loads(arguments) if arguments else {}
+            if not tool.is_read_only:
+                file_path = kwargs.get("file_path") or kwargs.get("path")
+                if file_path:
+                    self.snapshots.capture(file_path)
             return await tool.execute(**kwargs)
         except json.JSONDecodeError as e:
             return ToolResult.error(f"Invalid JSON arguments: {e}")
@@ -100,6 +170,7 @@ def create_default_registry() -> ToolRegistry:
         ReadFileTool,
         WriteFileTool,
     )
+    from deep_coder.tools.git import GitCommitTool, GitDiffTool, GitLogTool, GitStatusTool
     from deep_coder.tools.search import GlobFilesTool, GrepFilesTool
     from deep_coder.tools.shell import ExecShellTool
 
@@ -111,4 +182,8 @@ def create_default_registry() -> ToolRegistry:
     registry.register(GrepFilesTool())
     registry.register(GlobFilesTool())
     registry.register(ExecShellTool())
+    registry.register(GitStatusTool())
+    registry.register(GitDiffTool())
+    registry.register(GitLogTool())
+    registry.register(GitCommitTool())
     return registry

@@ -16,6 +16,16 @@ from deep_coder.prompts.system import get_orchestrator_prompt
 from deep_coder.tools.base import ToolRegistry
 
 
+def _make_assistant_msg(response: dict[str, Any]) -> dict[str, Any]:
+    """Build an assistant message dict, preserving reasoning_content if present."""
+    msg: dict[str, Any] = {"role": "assistant", "content": response.get("content")}
+    if response.get("reasoning_content"):
+        msg["reasoning_content"] = response["reasoning_content"]
+    if response.get("tool_calls"):
+        msg["tool_calls"] = response["tool_calls"]
+    return msg
+
+
 class Orchestrator:
     """Two-tier agent: Pro for planning/verification, Flash workers for execution."""
 
@@ -66,7 +76,7 @@ class Orchestrator:
             self.conversation.append({"role": "assistant", "content": verification})
             return verification
 
-        self.conversation.append({"role": "assistant", "content": content})
+        self.conversation.append(_make_assistant_msg(response))
         return content
 
     async def _handle_tool_calls(
@@ -85,11 +95,7 @@ class Orchestrator:
             if not current_response.get("tool_calls"):
                 return current_response.get("content") or ""
 
-            messages_copy.append({
-                "role": "assistant",
-                "content": current_response.get("content"),
-                "tool_calls": current_response["tool_calls"],
-            })
+            messages_copy.append(_make_assistant_msg(current_response))
 
             for tc in current_response["tool_calls"]:
                 fn = tc["function"]
@@ -183,6 +189,48 @@ class Orchestrator:
             on_token=on_token,
         )
         return response.get("content") or ""
+
+    async def compact(self, on_token: Any = None) -> str:
+        """Compress conversation history using Flash model to free context space."""
+        if len(self.conversation) < 2:
+            return "Nothing to compact."
+
+        history_text = ""
+        for msg in self.conversation:
+            role = msg.get("role", "?")
+            content = msg.get("content", "")
+            if content:
+                history_text += f"[{role}]: {content[:500]}\n"
+
+        compact_prompt = (
+            "Summarize the following conversation history concisely. "
+            "Preserve: key decisions, file paths mentioned, code changes made, "
+            "open questions, and current task state. "
+            "Drop: greetings, verbose tool outputs, redundant details.\n\n"
+            f"{history_text}"
+        )
+
+        response = await self.client.collect_stream(
+            messages=[
+                {"role": "system", "content": "You are a conversation summarizer. Be concise."},
+                {"role": "user", "content": compact_prompt},
+            ],
+            model_role=ModelRole.FLASH,
+            on_token=on_token,
+        )
+
+        summary = response.get("content") or ""
+        old_count = len(self.conversation)
+        self.conversation = [
+            {"role": "system", "content": f"[Compacted history — {old_count} messages]\n{summary}"},
+        ]
+        return summary
+
+    def export_conversation(self) -> list[dict[str, Any]]:
+        return list(self.conversation)
+
+    def import_conversation(self, messages: list[dict[str, Any]]) -> None:
+        self.conversation = list(messages)
 
     def clear_history(self) -> None:
         self.conversation.clear()

@@ -40,11 +40,14 @@ class Worker:
             )
 
             if response.get("tool_calls"):
-                messages.append({
+                assistant_msg: dict[str, Any] = {
                     "role": "assistant",
                     "content": response.get("content"),
                     "tool_calls": response["tool_calls"],
-                })
+                }
+                if response.get("reasoning_content"):
+                    assistant_msg["reasoning_content"] = response["reasoning_content"]
+                messages.append(assistant_msg)
                 for tc in response["tool_calls"]:
                     fn = tc["function"]
                     result = await self.tool_registry.dispatch(fn["name"], fn["arguments"])

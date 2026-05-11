@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import time
+from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Optional
 
 from openai import AsyncOpenAI
@@ -11,12 +13,74 @@ from openai.types.chat import ChatCompletionChunk
 from deep_coder.config import Config
 from deep_coder.models import ModelRole
 
+COST_PER_MILLION = {
+    "deepseek-v4-pro": {"input": 2.0, "output": 8.0},
+    "deepseek-v4-flash": {"input": 0.5, "output": 2.0},
+}
+DEFAULT_COST = {"input": 1.0, "output": 4.0}
+
+
+@dataclass
+class UsageStats:
+    """Tracks cumulative token usage and cost across API calls."""
+
+    total_prompt_tokens: int = 0
+    total_completion_tokens: int = 0
+    total_requests: int = 0
+    pro_prompt_tokens: int = 0
+    pro_completion_tokens: int = 0
+    pro_requests: int = 0
+    flash_prompt_tokens: int = 0
+    flash_completion_tokens: int = 0
+    flash_requests: int = 0
+    start_time: float = field(default_factory=time.time)
+
+    def record(self, model_role: ModelRole, prompt_tokens: int, completion_tokens: int) -> None:
+        self.total_prompt_tokens += prompt_tokens
+        self.total_completion_tokens += completion_tokens
+        self.total_requests += 1
+        if model_role == ModelRole.PRO:
+            self.pro_prompt_tokens += prompt_tokens
+            self.pro_completion_tokens += completion_tokens
+            self.pro_requests += 1
+        else:
+            self.flash_prompt_tokens += prompt_tokens
+            self.flash_completion_tokens += completion_tokens
+            self.flash_requests += 1
+
+    def estimated_cost(self, model_id: str, prompt_tokens: int, completion_tokens: int) -> float:
+        rates = COST_PER_MILLION.get(model_id, DEFAULT_COST)
+        return (prompt_tokens * rates["input"] + completion_tokens * rates["output"]) / 1_000_000
+
+    @property
+    def total_cost(self) -> float:
+        pro_cost = self.estimated_cost("deepseek-v4-pro", self.pro_prompt_tokens, self.pro_completion_tokens)
+        flash_cost = self.estimated_cost("deepseek-v4-flash", self.flash_prompt_tokens, self.flash_completion_tokens)
+        return pro_cost + flash_cost
+
+    @property
+    def elapsed_seconds(self) -> float:
+        return time.time() - self.start_time
+
+    def reset(self) -> None:
+        self.total_prompt_tokens = 0
+        self.total_completion_tokens = 0
+        self.total_requests = 0
+        self.pro_prompt_tokens = 0
+        self.pro_completion_tokens = 0
+        self.pro_requests = 0
+        self.flash_prompt_tokens = 0
+        self.flash_completion_tokens = 0
+        self.flash_requests = 0
+        self.start_time = time.time()
+
 
 class DeepSeekClient:
     """Async client for the DeepSeek API using OpenAI-compatible SDK."""
 
     def __init__(self, config: Config) -> None:
         self.config = config
+        self.usage = UsageStats()
         self._client = AsyncOpenAI(
             api_key=config.model.api_key or "sk-placeholder",
             base_url=config.model.base_url,
@@ -86,16 +150,22 @@ class DeepSeekClient:
             max_tokens=max_tokens,
         )
         choice = response.choices[0]
+        prompt_tokens = response.usage.prompt_tokens if response.usage else 0
+        completion_tokens = response.usage.completion_tokens if response.usage else 0
+        self.usage.record(model_role, prompt_tokens, completion_tokens)
         result: dict[str, Any] = {
             "role": "assistant",
             "content": choice.message.content,
             "tool_calls": None,
             "usage": {
-                "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
-                "completion_tokens": response.usage.completion_tokens if response.usage else 0,
-                "total_tokens": response.usage.total_tokens if response.usage else 0,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": (prompt_tokens + completion_tokens),
             },
         }
+        reasoning_content = getattr(choice.message, "reasoning_content", None)
+        if reasoning_content:
+            result["reasoning_content"] = reasoning_content
         if choice.message.tool_calls:
             result["tool_calls"] = [
                 {
@@ -119,12 +189,22 @@ class DeepSeekClient:
     ) -> dict[str, Any]:
         """Stream a response and collect the full result, calling on_token for each text delta."""
         content_parts: list[str] = []
+        reasoning_parts: list[str] = []
         tool_calls_map: dict[int, dict[str, Any]] = {}
+        stream_usage_prompt = 0
+        stream_usage_completion = 0
 
         async for chunk in self.chat_stream(messages, model_role, tools):
+            if hasattr(chunk, "usage") and chunk.usage:
+                stream_usage_prompt = getattr(chunk.usage, "prompt_tokens", 0) or 0
+                stream_usage_completion = getattr(chunk.usage, "completion_tokens", 0) or 0
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta
+
+            reasoning_content = getattr(delta, "reasoning_content", None)
+            if reasoning_content:
+                reasoning_parts.append(reasoning_content)
 
             if delta.content:
                 content_parts.append(delta.content)
@@ -149,11 +229,20 @@ class DeepSeekClient:
                         if tc_delta.function.arguments:
                             entry["function"]["arguments"] += tc_delta.function.arguments
 
+        if stream_usage_prompt or stream_usage_completion:
+            self.usage.record(model_role, stream_usage_prompt, stream_usage_completion)
+        else:
+            est_prompt = sum(len(m.get("content", "") or "") // 4 for m in messages)
+            est_completion = sum(len(p) for p in content_parts) // 4
+            self.usage.record(model_role, est_prompt, est_completion)
+
         result: dict[str, Any] = {
             "role": "assistant",
             "content": "".join(content_parts) if content_parts else None,
             "tool_calls": None,
         }
+        if reasoning_parts:
+            result["reasoning_content"] = "".join(reasoning_parts)
         if tool_calls_map:
             result["tool_calls"] = [tool_calls_map[i] for i in sorted(tool_calls_map)]
         return result

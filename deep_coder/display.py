@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Optional
+import shutil
+import sys
+import time
+from typing import TYPE_CHECKING, Any, Optional
 
 from rich.console import Console
 from rich.live import Live
@@ -13,6 +16,9 @@ from rich.spinner import Spinner
 from rich.syntax import Syntax
 from rich.text import Text
 from rich.theme import Theme
+
+if TYPE_CHECKING:
+    from deep_coder.client import UsageStats
 
 THEME = Theme({
     "info": "cyan",
@@ -94,16 +100,34 @@ def print_response(content: str) -> None:
 
 
 def print_help() -> None:
+    print_help_extended()
+
+
+def print_help_extended() -> None:
     help_text = """
-**Commands:**
-- `/help`    — Show this help message
-- `/clear`   — Clear conversation history
-- `/config`  — Show current configuration
-- `/exit`    — Exit Deep Coder
-- `/model`   — Show current model info
+**Session:**
+- `/clear`     — Clear conversation history and file snapshots
+- `/compact`   — Compress conversation history to free context space
+- `/cost`      — Show token usage and estimated cost
+- `/save [name]` — Save current session for later
+- `/resume [name]` — Resume a saved session (no arg = list sessions)
+
+**Code:**
+- `/diff`      — Show all file changes made in this session
+- `/undo`      — Revert the last file modification
+- `/init`      — Scan project and generate CODER.md
+
+**Settings:**
+- `/config`    — Show current configuration
+- `/model`     — Show model information
+- `/vim`       — Toggle vi input mode
+
+**General:**
+- `/help`      — Show this help message
+- `/exit`      — Exit Deep Coder
 
 **Tips:**
-- Multi-line input: press Alt+Enter or Escape then Enter
+- Multi-line input: press Escape then Enter
 - Interrupt generation: Ctrl+C
 """
     console.print(Markdown(help_text))
@@ -112,9 +136,10 @@ def print_help() -> None:
 class StreamPrinter:
     """Accumulates streaming tokens and prints them."""
 
-    def __init__(self) -> None:
+    def __init__(self, status_panel: StatusPanel | None = None) -> None:
         self._buffer: list[str] = []
         self._started = False
+        self._status_panel = status_panel
 
     async def on_token(self, token: str) -> None:
         if not self._started:
@@ -122,6 +147,8 @@ class StreamPrinter:
             self._started = True
         console.print(token, end="", highlight=False)
         self._buffer.append(token)
+        if self._status_panel:
+            self._status_panel.refresh()
 
     def get_content(self) -> str:
         return "".join(self._buffer)
@@ -129,3 +156,54 @@ class StreamPrinter:
     def finish(self) -> None:
         if self._started:
             console.print()
+
+
+class StatusPanel:
+    """Floating top-right panel showing real-time token usage and cost."""
+
+    PANEL_WIDTH = 26
+    PANEL_HEIGHT = 5
+    THROTTLE_INTERVAL = 1.0
+
+    def __init__(self, usage: UsageStats) -> None:
+        self._usage = usage
+        self._last_render: float = 0.0
+
+    def refresh(self, force: bool = False) -> None:
+        now = time.monotonic()
+        if not force and (now - self._last_render) < self.THROTTLE_INTERVAL:
+            return
+        self._last_render = now
+        self._render()
+
+    def _render(self) -> None:
+        cols, _ = shutil.get_terminal_size((80, 24))
+        if cols < self.PANEL_WIDTH + 4:
+            return
+
+        u = self._usage
+        pro_tokens = u.pro_prompt_tokens + u.pro_completion_tokens
+        flash_tokens = u.flash_prompt_tokens + u.flash_completion_tokens
+        total_tokens = pro_tokens + flash_tokens
+        pro_cost = u.estimated_cost("deepseek-v4-pro", u.pro_prompt_tokens, u.pro_completion_tokens)
+        flash_cost = u.estimated_cost("deepseek-v4-flash", u.flash_prompt_tokens, u.flash_completion_tokens)
+        total_cost = pro_cost + flash_cost
+
+        w = self.PANEL_WIDTH
+        inner = w - 2
+        col_start = cols - w
+
+        lines = [
+            "┌─ Cost " + "─" * (inner - 7) + "┐",
+            f"│ {'Pro':6s} {pro_tokens:>7,}  ${pro_cost:>.3f} │",
+            f"│ {'Flash':6s} {flash_tokens:>7,}  ${flash_cost:>.3f} │",
+            f"│ {'Total':6s} {total_tokens:>7,}  ${total_cost:>.3f} │",
+            "└" + "─" * inner + "┘",
+        ]
+
+        out = sys.stdout
+        out.write("\0337")  # save cursor
+        for i, line in enumerate(lines):
+            out.write(f"\033[{i + 1};{col_start + 1}H{line}")
+        out.write("\0338")  # restore cursor
+        out.flush()
