@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Deep Coder local config (contains API keys)
+.deep-coder/

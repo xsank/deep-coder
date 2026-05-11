@@ -14,7 +14,7 @@ from prompt_toolkit.keys import Keys
 
 from deep_coder.agent.orchestrator import Orchestrator
 from deep_coder.client import DeepSeekClient
-from deep_coder.config import CONFIG_DIR, HISTORY_FILE, Config
+from deep_coder.config import GLOBAL_CONFIG_DIR, HISTORY_FILE, Config
 from deep_coder.display import (
     StreamPrinter,
     console,
@@ -79,7 +79,7 @@ async def _handle_slash_command(command: str, orchestrator: Orchestrator, config
 
 
 async def _run_repl(config: Config) -> None:
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    GLOBAL_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     session: PromptSession = PromptSession(
         history=FileHistory(str(HISTORY_FILE)),
         key_bindings=_create_key_bindings(),

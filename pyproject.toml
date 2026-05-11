@@ -7,7 +7,7 @@ name = "deep-coder"
 version = "0.1.0"
 description = "The most cost-effective code assistant tool based on DeepSeek V4"
 readme = "README.md"
-license = {text = "MIT"}
+license = {text = "AGPL-3.0"}
 requires-python = ">=3.10"
 authors = [
     {name = "xsank"},
@@ -17,7 +17,7 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: GNU Affero General Public License v3",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",

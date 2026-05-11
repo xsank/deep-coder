@@ -43,10 +43,18 @@ pip install -e .
 
 ## Quick Start
 
-1. Set your API key:
+1. Set your API key (choose one method):
 
 ```bash
+# Method A: Environment variable
 export DEEPSEEK_API_KEY="your-api-key-here"
+
+# Method B: Project-local config (recommended, auto-gitignored)
+mkdir -p .deep-coder
+cat > .deep-coder/config.toml << 'EOF'
+[model]
+api_key = "your-api-key-here"
+EOF
 ```
 
 2. Run Deep Coder:
@@ -57,7 +65,13 @@ deep-coder
 
 ## Configuration
 
-Configuration is loaded from `~/.deep-coder/config.toml`:
+Configuration is loaded in priority order (later overrides earlier):
+
+1. **Global config**: `~/.deep-coder/config.toml`
+2. **Project-local config**: `.deep-coder/config.toml` (in project root, gitignored)
+3. **Environment variables**: `DEEPSEEK_API_KEY`, etc.
+
+Example `config.toml`:
 
 ```toml
 [model]
@@ -139,4 +153,4 @@ plugins/
 
 ## License
 
-MIT
+AGPL-3.0

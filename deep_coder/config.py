@@ -17,13 +17,27 @@ else:
 import tomli_w
 
 
-CONFIG_DIR = Path.home() / ".deep-coder"
-CONFIG_FILE = CONFIG_DIR / "config.toml"
-HISTORY_FILE = CONFIG_DIR / "history"
+GLOBAL_CONFIG_DIR = Path.home() / ".deep-coder"
+GLOBAL_CONFIG_FILE = GLOBAL_CONFIG_DIR / "config.toml"
+HISTORY_FILE = GLOBAL_CONFIG_DIR / "history"
+
+LOCAL_CONFIG_DIR_NAME = ".deep-coder"
 
 DEFAULT_BASE_URL = "https://api.deepseek.com"
 DEFAULT_PRO_MODEL = "deepseek-v4-pro"
 DEFAULT_FLASH_MODEL = "deepseek-v4-flash"
+
+
+def _find_local_config() -> Path | None:
+    """Walk up from cwd to find a project-local .deep-coder/config.toml."""
+    current = Path.cwd()
+    for parent in [current, *current.parents]:
+        candidate = parent / LOCAL_CONFIG_DIR_NAME / "config.toml"
+        if candidate.is_file():
+            return candidate
+        if (parent / ".git").exists():
+            break
+    return None
 
 
 class ModelConfig(BaseModel):
@@ -49,19 +63,29 @@ class Config(BaseModel):
     approval_policy: str = Field(default="on-request")
 
     @classmethod
+    def _apply_toml(cls, config: Config, path: Path) -> None:
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+        if "model" in data:
+            config.model = ModelConfig(**{**config.model.model_dump(), **data["model"]})
+        if "agent" in data:
+            config.agent = AgentConfig(**{**config.agent.model_dump(), **data["agent"]})
+        if "shell_allowed" in data:
+            config.shell_allowed = data["shell_allowed"]
+        if "approval_policy" in data:
+            config.approval_policy = data["approval_policy"]
+
+    @classmethod
     def load(cls) -> Config:
         config = cls()
-        if CONFIG_FILE.exists():
-            with open(CONFIG_FILE, "rb") as f:
-                data = tomllib.load(f)
-            if "model" in data:
-                config.model = ModelConfig(**{**config.model.model_dump(), **data["model"]})
-            if "agent" in data:
-                config.agent = AgentConfig(**{**config.agent.model_dump(), **data["agent"]})
-            if "shell_allowed" in data:
-                config.shell_allowed = data["shell_allowed"]
-            if "approval_policy" in data:
-                config.approval_policy = data["approval_policy"]
+        # 1. Global config (~/.deep-coder/config.toml)
+        if GLOBAL_CONFIG_FILE.exists():
+            cls._apply_toml(config, GLOBAL_CONFIG_FILE)
+        # 2. Project-local config (.deep-coder/config.toml) overrides global
+        local = _find_local_config()
+        if local:
+            cls._apply_toml(config, local)
+        # 3. Environment variables override everything
         config._apply_env_overrides()
         return config
 
@@ -75,10 +99,15 @@ class Config(BaseModel):
         if model := os.environ.get("DEEPSEEK_FLASH_MODEL"):
             self.model.flash_model = model
 
-    def save(self) -> None:
-        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    def save(self, local: bool = False) -> None:
+        if local:
+            config_dir = Path.cwd() / LOCAL_CONFIG_DIR_NAME
+        else:
+            config_dir = GLOBAL_CONFIG_DIR
+        config_dir.mkdir(parents=True, exist_ok=True)
+        config_file = config_dir / "config.toml"
         data = self.model_dump()
-        with open(CONFIG_FILE, "wb") as f:
+        with open(config_file, "wb") as f:
             tomli_w.dump(data, f)
 
     @property
