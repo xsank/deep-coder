@@ -105,6 +105,15 @@ def print_help() -> None:
 
 def print_help_extended() -> None:
     help_text = """
+**Skills:**
+- `/review [file|staged]` — AI code review for staged changes or a file
+- `/commit [hint]`   — Generate smart commit message and commit
+- `/test [command]`   — Run tests (auto-detect) and analyze failures
+- `/fix <error>`      — Analyze error message and fix root cause
+- `/think <question>` — Deep reasoning for architecture/design questions
+- `/pr [base]`        — Generate PR title and description from branch diff
+- `/explain [file:lines]` — Explain code, file, or project overview
+
 **Session:**
 - `/clear`     — Clear conversation history and file snapshots
 - `/compact`   — Compress conversation history to free context space

@@ -33,6 +33,8 @@ from deep_coder.display import (
     print_warning,
 )
 from deep_coder.models import get_registry
+from deep_coder.skills import SkillRegistry, create_default_skills
+from deep_coder.skills.base import SkillContext
 from deep_coder.tools.base import create_default_registry
 
 SESSIONS_DIR = GLOBAL_CONFIG_DIR / "sessions"
@@ -57,11 +59,13 @@ class CommandHandler:
         client: DeepSeekClient,
         config: Config,
         status_panel: StatusPanel | None = None,
+        skills: SkillRegistry | None = None,
     ) -> None:
         self.orchestrator = orchestrator
         self.client = client
         self.config = config
         self.status_panel = status_panel
+        self.skills = skills
         self.vi_mode = False
 
     async def handle(self, command: str) -> bool:
@@ -90,6 +94,27 @@ class CommandHandler:
 
         if handler:
             return await handler(arg)
+
+        if self.skills:
+            skill = self.skills.get(cmd)
+            if skill:
+                if not self.config.has_api_key:
+                    print_error("API key not configured.")
+                    return False
+                skill_ctx = SkillContext(
+                    orchestrator=self.orchestrator,
+                    client=self.client,
+                    config=self.config,
+                    status_panel=self.status_panel,
+                    cwd=os.getcwd(),
+                )
+                try:
+                    await skill.execute(arg, skill_ctx)
+                except KeyboardInterrupt:
+                    print_warning("\nInterrupted.")
+                except Exception as e:
+                    print_error(f"Skill failed: {e}")
+                return False
 
         print_warning(f"Unknown command: {cmd}. Type /help for available commands.")
         return False
@@ -300,7 +325,8 @@ async def _run_repl(config: Config) -> None:
     orchestrator.set_cwd(os.getcwd())
 
     status_panel = StatusPanel(client.usage)
-    cmd_handler = CommandHandler(orchestrator, client, config, status_panel)
+    skills = create_default_skills()
+    cmd_handler = CommandHandler(orchestrator, client, config, status_panel, skills)
 
     session: PromptSession = PromptSession(
         history=FileHistory(str(HISTORY_FILE)),
