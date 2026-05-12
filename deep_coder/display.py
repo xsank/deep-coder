@@ -109,7 +109,7 @@ def _boot_sequence(__version__: str, platform, term_w: int) -> None:
         ("", 0.02),
         (f"  [green]✓[/] Orchestrator Core   [dim]Pro V4[/]         [bold green]online[/]", 0.04),
         (f"  [green]✓[/] Worker Swarm        [dim]Flash V4 ×5[/]    [bold green]online[/]", 0.04),
-        (f"  [green]✓[/] Tool Registry       [dim]7 tools[/]        [bold green]loaded[/]", 0.03),
+        (f"  [green]✓[/] Tool Registry       [dim]19 tools[/]       [bold green]loaded[/]", 0.03),
         (f"  [green]✓[/] Skill Registry      [dim]9 skills[/]       [bold green]loaded[/]", 0.03),
         (f"  [green]✓[/] API Connection      [dim]deepseek.com[/]   [bold green]connected[/]", 0.04),
         ("", 0.03),
@@ -543,6 +543,13 @@ def summarize_tool_args(tool_name: str, arguments_json: str) -> str:
         return args.get("message", "")[:40]
     if tool_name == "git_checkout":
         return args.get("branch", "")
+    if tool_name == "web_search":
+        return args.get("query", "")[:50]
+    if tool_name == "web_fetch":
+        from urllib.parse import urlparse
+        url = args.get("url", "")
+        parsed = urlparse(url)
+        return parsed.netloc or url[:50]
     return ""
 
 
@@ -565,6 +572,11 @@ def summarize_tool_result(
         if "exit code:" in content.lower():
             return "error"
         return "ok"
+    if tool_name == "web_search":
+        n = content.count("\n\n")
+        return f"{n} results" if n > 0 else "0 results"
+    if tool_name == "web_fetch":
+        return f"{len(content)} chars"
     return "ok"
 
 

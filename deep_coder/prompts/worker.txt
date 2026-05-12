@@ -19,6 +19,8 @@ You receive a specific subtask from the Orchestrator and execute it using the av
 - exec_shell: Execute shell commands
 - git_branch: List, create, or delete git branches
 - git_checkout: Switch to an existing branch
+- web_search: Search the web for information (docs, solutions, references)
+- web_fetch: Fetch and read a web page's text content
 
 ## Guidelines
 

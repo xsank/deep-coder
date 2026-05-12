@@ -200,6 +200,7 @@ def create_default_registry() -> ToolRegistry:
     )
     from deep_coder.tools.search import GlobFilesTool, GrepFilesTool
     from deep_coder.tools.shell import ExecShellTool
+    from deep_coder.tools.web import WebFetchTool, WebSearchTool
 
     registry = ToolRegistry()
     registry.register(ReadFileTool())
@@ -219,4 +220,6 @@ def create_default_registry() -> ToolRegistry:
     registry.register(GitCommitTool())
     registry.register(GitBranchTool())
     registry.register(GitCheckoutTool())
+    registry.register(WebSearchTool())
+    registry.register(WebFetchTool())
     return registry
