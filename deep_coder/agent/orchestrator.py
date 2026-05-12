@@ -9,7 +9,7 @@ from typing import Any, Optional
 
 from deep_coder.agent.task import Plan, Task, TaskStatus
 from deep_coder.agent.worker import OnApprove, Worker
-from deep_coder.client import DeepSeekClient
+from deep_coder.client import DeepSeekClient, strip_dsml
 from deep_coder.config import Config
 from deep_coder.display import (
     PhaseSpinner,
@@ -23,28 +23,11 @@ from deep_coder.prompts.system import get_orchestrator_prompt
 from deep_coder.tools.base import ToolRegistry
 
 
-_DSML_TAG_RE = re.compile(r"</?[｜|]*DSML[｜|]*[^>]*>")
-
-
-def _strip_dsml(content: str) -> str:
-    """Remove DeepSeek internal markup (DSML tags) leaked into text content."""
-    if "DSML" not in content:
-        return content
-    first = last = None
-    for m in _DSML_TAG_RE.finditer(content):
-        if first is None:
-            first = m.start()
-        last = m.end()
-    if first is not None and last is not None:
-        content = content[:first] + content[last:]
-    return content.strip()
-
-
 def _make_assistant_msg(response: dict[str, Any]) -> dict[str, Any]:
     """Build an assistant message dict, preserving reasoning_content if present."""
     content = response.get("content")
     if content:
-        content = _strip_dsml(content)
+        content = strip_dsml(content)
     msg: dict[str, Any] = {"role": "assistant", "content": content}
     if response.get("reasoning_content"):
         msg["reasoning_content"] = response["reasoning_content"]
@@ -60,7 +43,7 @@ class Orchestrator:
         self.client = client
         self.config = config
         self.tool_registry = tool_registry
-        self.worker = Worker(client, tool_registry)
+        self.worker = Worker(client, tool_registry, config)
         self.conversation: list[dict[str, Any]] = []
         self._cwd: Optional[str] = None
         self._on_approve: OnApprove = None
@@ -72,6 +55,31 @@ class Orchestrator:
     def set_approve_handler(self, handler: OnApprove) -> None:
         self._on_approve = handler
 
+    async def _needs_planning(self, message: str) -> bool:
+        """Fast classifier: does this message need Pro planning or can Flash handle it directly?"""
+        if len(message) > 200:
+            return True
+        response = await self.client.chat_complete(
+            messages=[
+                {"role": "system", "content": "You classify user messages. Answer YES or NO only."},
+                {"role": "user", "content": (
+                    "Is this message a simple greeting, casual chat, or general knowledge "
+                    "question that has NOTHING to do with code, projects, files, tools, "
+                    "programming, or software?\n\n"
+                    f"Message: {message}\n\nAnswer YES or NO:"
+                )},
+            ],
+            model_role=ModelRole.FLASH,
+            max_tokens=10,
+            temperature=0.0,
+        )
+        answer = (response.get("content") or "").strip().upper()
+        return "YES" not in answer
+
+    def _estimate_tokens(self) -> int:
+        """Rough token estimate: ~4 chars per token."""
+        return sum(len(m.get("content", "") or "") // 4 for m in self.conversation)
+
     async def process(
         self,
         user_message: str,
@@ -79,6 +87,27 @@ class Orchestrator:
         on_status: Any = None,
     ) -> str:
         self.conversation.append({"role": "user", "content": user_message})
+
+        if self._estimate_tokens() > self.config.model.context_limit:
+            n = len(self.conversation)
+            console.print(f"  [dim]Auto-compacting conversation ({n} messages)...[/dim]")
+            await self.compact()
+
+        if not await self._needs_planning(user_message):
+            response = await self.client.collect_stream(
+                messages=[
+                    {"role": "system", "content": (
+                        "You are Deep Coder, a helpful coding assistant. "
+                        "Answer concisely."
+                    )},
+                    *self.conversation,
+                ],
+                model_role=ModelRole.FLASH,
+                on_token=on_token,
+            )
+            content = response.get("content") or ""
+            self.conversation.append({"role": "assistant", "content": content})
+            return content
 
         system_prompt = get_orchestrator_prompt(self._cwd)
         messages = [{"role": "system", "content": system_prompt}] + self.conversation
@@ -97,7 +126,7 @@ class Orchestrator:
             await reasoning_display.stop(interrupted=True)
             raise KeyboardInterrupt("Interrupted during planning")
 
-        content = _strip_dsml(response.get("content") or "")
+        content = strip_dsml(response.get("content") or "")
 
         plan = self._try_extract_plan(content)
         if plan and len(plan.tasks) > 0:

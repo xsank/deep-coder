@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Optional
@@ -12,6 +13,23 @@ from openai.types.chat import ChatCompletionChunk
 
 from deep_coder.config import Config
 from deep_coder.models import ModelRole
+
+_DSML_TAG_RE = re.compile(r"</?[｜|]*DSML[｜|]*[^>]*>")
+
+
+def strip_dsml(content: str) -> str:
+    """Remove DeepSeek internal markup (DSML tags) leaked into text content."""
+    if "DSML" not in content:
+        return content
+    first = last = None
+    for m in _DSML_TAG_RE.finditer(content):
+        if first is None:
+            first = m.start()
+        last = m.end()
+    if first is not None and last is not None:
+        content = content[:first] + content[last:]
+    return content.strip()
+
 
 COST_PER_MILLION = {
     "deepseek-v4-pro": {"input": 2.0, "output": 8.0},
@@ -239,9 +257,10 @@ class DeepSeekClient:
             est_completion = sum(len(p) for p in content_parts) // 4
             self.usage.record(model_role, est_prompt, est_completion)
 
+        raw_content = "".join(content_parts) if content_parts else None
         result: dict[str, Any] = {
             "role": "assistant",
-            "content": "".join(content_parts) if content_parts else None,
+            "content": strip_dsml(raw_content) if raw_content else None,
             "tool_calls": None,
         }
         if reasoning_parts:

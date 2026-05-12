@@ -131,6 +131,87 @@ class GitLogTool(_GitBaseTool):
         return ToolResult.ok(out or "(no commits)")
 
 
+class GitBranchTool(_GitBaseTool):
+    @property
+    def name(self) -> str:
+        return "git_branch"
+
+    @property
+    def description(self) -> str:
+        return "List, create, or delete git branches."
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "create": {
+                    "type": "string",
+                    "description": "Name of a new branch to create (from current HEAD).",
+                },
+                "delete": {
+                    "type": "string",
+                    "description": "Name of a branch to delete.",
+                },
+            },
+        }
+
+    @property
+    def requires_approval(self) -> bool:
+        return True
+
+    async def execute(
+        self, create: str | None = None, delete: str | None = None, **_: Any,
+    ) -> ToolResult:
+        if create:
+            code, out, err = await self._run_git("checkout", "-b", create)
+            if code != 0:
+                return ToolResult.error(f"git checkout -b failed: {err}")
+            return ToolResult.ok(f"Created and switched to branch '{create}'")
+        if delete:
+            code, out, err = await self._run_git("branch", "-d", delete)
+            if code != 0:
+                return ToolResult.error(f"git branch -d failed: {err}")
+            return ToolResult.ok(out)
+        code, out, err = await self._run_git("branch", "-a")
+        if code != 0:
+            return ToolResult.error(f"git branch failed: {err}")
+        return ToolResult.ok(out or "(no branches)")
+
+
+class GitCheckoutTool(_GitBaseTool):
+    @property
+    def name(self) -> str:
+        return "git_checkout"
+
+    @property
+    def description(self) -> str:
+        return "Switch to an existing branch or restore files."
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "branch": {
+                    "type": "string",
+                    "description": "Branch name to switch to.",
+                },
+            },
+            "required": ["branch"],
+        }
+
+    @property
+    def requires_approval(self) -> bool:
+        return True
+
+    async def execute(self, branch: str, **_: Any) -> ToolResult:
+        code, out, err = await self._run_git("checkout", branch)
+        if code != 0:
+            return ToolResult.error(f"git checkout failed: {err}")
+        return ToolResult.ok(f"Switched to branch '{branch}'")
+
+
 class GitCommitTool(_GitBaseTool):
     @property
     def name(self) -> str:

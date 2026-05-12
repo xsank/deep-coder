@@ -190,7 +190,14 @@ def create_default_registry() -> ToolRegistry:
         ReadFileTool,
         WriteFileTool,
     )
-    from deep_coder.tools.git import GitCommitTool, GitDiffTool, GitLogTool, GitStatusTool
+    from deep_coder.tools.git import (
+        GitBranchTool,
+        GitCheckoutTool,
+        GitCommitTool,
+        GitDiffTool,
+        GitLogTool,
+        GitStatusTool,
+    )
     from deep_coder.tools.search import GlobFilesTool, GrepFilesTool
     from deep_coder.tools.shell import ExecShellTool
 
@@ -210,4 +217,6 @@ def create_default_registry() -> ToolRegistry:
     registry.register(GitDiffTool())
     registry.register(GitLogTool())
     registry.register(GitCommitTool())
+    registry.register(GitBranchTool())
+    registry.register(GitCheckoutTool())
     return registry

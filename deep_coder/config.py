@@ -48,6 +48,7 @@ class ModelConfig(BaseModel):
     max_tokens: int = Field(default=8192)
     temperature: float = Field(default=0.0)
     reasoning_effort: str = Field(default="high")
+    context_limit: int = Field(default=60000)
 
 
 class AgentConfig(BaseModel):

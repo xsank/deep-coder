@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any, Callable, Coroutine, Optional
 
 from deep_coder.agent.task import Task
-from deep_coder.client import DeepSeekClient
+from deep_coder.client import DeepSeekClient, strip_dsml
+from deep_coder.config import Config
 from deep_coder.display import print_file_diff
 from deep_coder.models import ModelRole
 from deep_coder.prompts.system import get_worker_prompt
-from deep_coder.tools.base import ToolRegistry
+from deep_coder.tools.base import Tool, ToolRegistry
 
 OnWorkerStatus = Optional[Callable[[str, str, str], Coroutine[Any, Any, None]]]
 OnApprove = Optional[Callable[[str, str], Coroutine[Any, Any, bool]]]
@@ -28,13 +28,25 @@ def _make_assistant_msg(response: dict[str, Any]) -> dict[str, Any]:
 class Worker:
     """Executes a single subtask using DeepSeek V4 Flash with tool access."""
 
-    def __init__(self, client: DeepSeekClient, tool_registry: ToolRegistry) -> None:
+    def __init__(self, client: DeepSeekClient, tool_registry: ToolRegistry, config: Config) -> None:
         self.client = client
         self.tool_registry = tool_registry
+        self.config = config
         self._cwd: str | None = None
 
     def set_cwd(self, cwd: str) -> None:
         self._cwd = cwd
+
+    def _should_auto_approve(self, tool: Tool) -> bool:
+        """Check if a tool call can be auto-approved based on config policy."""
+        policy = self.config.approval_policy
+        if policy == "auto":
+            return True
+        if policy == "none":
+            return False
+        if self.config.agent.auto_approve_reads and tool.is_read_only:
+            return True
+        return False
 
     async def execute(
         self,
@@ -63,12 +75,20 @@ class Worker:
         max_iterations = 15
         for iteration in range(max_iterations):
             if on_worker_status:
-                await on_worker_status(task.id, "running", f"thinking ({iteration + 1}/{max_iterations})")
+                detail = f"thinking ({iteration + 1}/{max_iterations})"
+                await on_worker_status(task.id, "running", detail)
 
-            response = await self.client.chat_complete(
+            async def on_reasoning(text: str) -> None:
+                if on_worker_status:
+                    truncated = text.strip().replace("\n", " ")[:60]
+                    if truncated:
+                        await on_worker_status(task.id, "running", f"thinking: {truncated}")
+
+            response = await self.client.collect_stream(
                 messages=messages,
                 model_role=ModelRole.FLASH,
                 tools=tools if tools else None,
+                on_reasoning=on_reasoning,
             )
 
             if response.get("tool_calls"):
@@ -83,8 +103,10 @@ class Worker:
                         await on_status(task, f"tool:{tool_name}")
 
                     tool_obj = self.tool_registry.get(tool_name)
-                    if on_approve and tool_obj and tool_obj.requires_approval:
-                        approved = await on_approve(tool_name, fn["arguments"])
+                    if tool_obj and tool_obj.requires_approval:
+                        approved = self._should_auto_approve(tool_obj)
+                        if not approved and on_approve:
+                            approved = await on_approve(tool_name, fn["arguments"])
                         if not approved:
                             messages.append({
                                 "role": "tool",
@@ -106,7 +128,7 @@ class Worker:
                         "content": result.content,
                     })
             else:
-                content = response.get("content") or ""
+                content = strip_dsml(response.get("content") or "")
                 task.mark_completed(content)
                 if on_status:
                     await on_status(task, "completed")

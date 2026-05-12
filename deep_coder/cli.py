@@ -329,8 +329,15 @@ class CommandHandler:
         return False
 
 
+_session_auto_approve = False
+
+
 async def _ask_approval(tool_name: str, arguments: str) -> bool:
     """Ask user for approval before executing a write/shell tool."""
+    global _session_auto_approve
+    if _session_auto_approve:
+        return True
+
     console.print(f"\n  [warning]Approval required:[/warning] [tool]{tool_name}[/tool]")
     try:
         args = json.loads(arguments)
@@ -344,7 +351,10 @@ async def _ask_approval(tool_name: str, arguments: str) -> bool:
 
     loop = asyncio.get_event_loop()
     answer = await loop.run_in_executor(None, lambda: input().strip().lower())
-    return answer in ("y", "yes", "a", "always")
+    if answer in ("a", "always"):
+        _session_auto_approve = True
+        return True
+    return answer in ("y", "yes")
 
 
 _INTERACTIVE_CMDS = frozenset({
