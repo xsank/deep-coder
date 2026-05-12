@@ -76,23 +76,23 @@ class Worker:
         ]
         tools = self.tool_registry.to_openai_tools()
 
-        max_iterations = 15
+        task_brief = task.description.replace("\n", " ")[:50]
+        if len(task.description) > 50:
+            task_brief += "..."
+
+        max_iterations = 30
         for iteration in range(max_iterations):
             if on_worker_status:
-                detail = f"thinking ({iteration + 1}/{max_iterations})"
+                if iteration == 0:
+                    detail = f"analyzing: {task_brief}"
+                else:
+                    detail = f"analyzing (round {iteration + 1})"
                 await on_worker_status(task.id, "running", detail)
-
-            async def on_reasoning(text: str) -> None:
-                if on_worker_status:
-                    truncated = text.strip().replace("\n", " ")[:60]
-                    if truncated:
-                        await on_worker_status(task.id, "running", f"thinking: {truncated}")
 
             response = await self.client.collect_stream(
                 messages=messages,
                 model_role=ModelRole.FLASH,
                 tools=tools if tools else None,
-                on_reasoning=on_reasoning,
             )
 
             if response.get("tool_calls"):

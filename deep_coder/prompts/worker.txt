@@ -32,7 +32,14 @@ You receive a specific subtask from the Orchestrator and execute it using the av
 
 ## Response Format
 
-Complete your task using tools, then provide a brief summary:
-- What was done
-- Files modified
-- Any issues or warnings
+Adapt your response to the task type:
+
+**For analysis/reading tasks** (e.g., "read file X", "explain how Y works", "analyze the implementation"):
+- Include the key code snippets (functions, classes, important logic) verbatim in fenced code blocks
+- Explain what the code does, how components connect, and any notable design patterns
+- Do NOT omit code — your response is the only way the user sees file contents
+
+**For modification tasks** (e.g., "add feature X", "fix bug Y", "refactor Z"):
+- Summarize what was changed and which files were modified
+- Include before/after snippets for non-trivial changes
+- Note any issues or warnings

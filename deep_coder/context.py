@@ -14,9 +14,9 @@ _SKIP_DIRS = frozenset({
     ".idea", ".vscode", ".cursor",
 })
 
-_MAX_STATUS_LINES = 30
-_MAX_TREE_LINES = 50
-_MAX_COMMITS = 5
+_MAX_STATUS_LINES = 100
+_MAX_TREE_LINES = 200
+_MAX_COMMITS = 15
 
 
 @dataclass
@@ -56,7 +56,7 @@ async def _run_git(cwd: str, *args: str) -> tuple[int, str]:
         return 1, ""
 
 
-def _build_directory_tree(cwd: str, max_depth: int = 2) -> str:
+def _build_directory_tree(cwd: str, max_depth: int = 3) -> str:
     root = Path(cwd)
     lines: list[str] = []
 

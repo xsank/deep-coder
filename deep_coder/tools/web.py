@@ -156,7 +156,7 @@ class WebFetchTool(Tool):
                 },
                 "max_chars": {
                     "type": "integer",
-                    "description": "Maximum characters to return. Default: 10000.",
+                    "description": "Maximum characters to return. Default: 50000.",
                 },
             },
             "required": ["url"],
@@ -173,7 +173,7 @@ class WebFetchTool(Tool):
     async def execute(
         self,
         url: str,
-        max_chars: int = 10000,
+        max_chars: int = 50000,
         **_: Any,
     ) -> ToolResult:
         if not url.strip():

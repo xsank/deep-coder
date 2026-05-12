@@ -8,8 +8,8 @@ from typing import Any
 
 PROMPTS_DIR = Path(__file__).parent
 
-MAX_CODER_MD_CHARS = 2000
-MAX_MEMORY_CHARS = 3000
+MAX_CODER_MD_CHARS = 10000
+MAX_MEMORY_CHARS = 10000
 
 
 def load_prompt(name: str) -> str:

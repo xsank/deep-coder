@@ -45,10 +45,10 @@ class ModelConfig(BaseModel):
     flash_model: str = Field(default=DEFAULT_FLASH_MODEL)
     base_url: str = Field(default=DEFAULT_BASE_URL)
     api_key: str = Field(default="")
-    max_tokens: int = Field(default=8192)
+    max_tokens: int = Field(default=16384)
     temperature: float = Field(default=0.0)
     reasoning_effort: str = Field(default="high")
-    context_limit: int = Field(default=60000)
+    context_limit: int = Field(default=900000)
 
 
 class AgentConfig(BaseModel):

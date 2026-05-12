@@ -12,7 +12,6 @@ from deep_coder.agent.worker import OnApprove, Worker
 from deep_coder.client import DeepSeekClient, strip_dsml
 from deep_coder.config import Config
 from deep_coder.display import (
-    PhaseSpinner,
     ReasoningStreamDisplay,
     TaskProgressDisplay,
     console,
@@ -182,22 +181,26 @@ class Orchestrator:
             except (KeyboardInterrupt, asyncio.CancelledError):
                 raise KeyboardInterrupt("Interrupted during execution")
 
+            from deep_coder.display import StreamPrinter
+            verify_printer = StreamPrinter(
+                phase="verifying", phase_detail="reviewing results",
+            )
             try:
-                async with PhaseSpinner("verifying", "reviewing results"):
-                    verification = await self._verify_results(plan, user_message)
+                verification = await self._verify_results(
+                    plan, user_message, on_token=verify_printer.on_token,
+                )
             except (KeyboardInterrupt, asyncio.CancelledError):
+                verify_printer.finish()
                 raise KeyboardInterrupt("Interrupted during verification")
+            verify_printer.finish()
 
             self.conversation.append({"role": "assistant", "content": verification})
-            from deep_coder.display import Markdown as RichMarkdown
-            console.print()
-            console.print(RichMarkdown(verification))
-            console.print()
             return ""
 
         if on_token and content:
-            for char in content:
-                await on_token(char)
+            chunk_size = 20
+            for i in range(0, len(content), chunk_size):
+                await on_token(content[i:i + chunk_size])
 
         self.conversation.append(_make_assistant_msg(response))
         return content
@@ -216,7 +219,7 @@ class Orchestrator:
             pass
         return None
 
-    def _build_conversation_summary(self, max_exchanges: int = 5) -> str:
+    def _build_conversation_summary(self, max_exchanges: int = 20) -> str:
         """Build a compact summary of recent conversation for worker context."""
         recent = self.conversation[-(max_exchanges * 2):]
         parts: list[str] = []
@@ -225,7 +228,7 @@ class Orchestrator:
             content = msg.get("content", "") or ""
             if not content or role == "system":
                 continue
-            truncated = content[:300] + ("..." if len(content) > 300 else "")
+            truncated = content[:2000] + ("..." if len(content) > 2000 else "")
             parts.append(f"[{role}]: {truncated}")
         return "\n".join(parts) if parts else ""
 
@@ -274,7 +277,7 @@ class Orchestrator:
                         for dep_id in task.depends_on:
                             dep = completed_tasks.get(dep_id)
                             if dep and dep.result:
-                                dep_results.append(f"[{dep_id}]: {dep.result[:500]}")
+                                dep_results.append(f"[{dep_id}]: {dep.result[:3000]}")
                         if dep_results:
                             task.context += "\n\nCompleted dependency results:\n" + "\n".join(dep_results)
                 coros = [
@@ -337,10 +340,23 @@ class Orchestrator:
             if on_worker_status:
                 await on_worker_status(task.id, "failed", str(e)[:60])
 
+    _ANALYSIS_KEYWORDS = (
+        "分析", "解释", "explain", "analyze", "analysis", "how does",
+        "how do", "what is", "what are", "读", "read", "show", "展示",
+        "查看", "review", "describe", "介绍", "理解", "understand",
+        "看看", "说明", "详细", "detail", "具体", "代码", "实现",
+        "implementation", "architecture", "架构", "原理",
+    )
+
+    def _is_analysis_request(self, request: str) -> bool:
+        text = request.lower()
+        return any(kw in text for kw in self._ANALYSIS_KEYWORDS)
+
     async def _verify_results(
         self,
         plan: Plan,
         original_request: str,
+        on_token: Any = None,
     ) -> str:
         results_summary = []
         for task in plan.tasks:
@@ -352,14 +368,36 @@ class Orchestrator:
                 f"Result: {result_text}\n"
             )
 
+        results_block = "\n".join(results_summary)
+
+        if self._is_analysis_request(original_request):
+            instruction = (
+                "The user asked for code analysis/explanation. "
+                "Synthesize a comprehensive response that:\n"
+                "- Preserves key code snippets from worker results "
+                "in fenced code blocks (```python etc.)\n"
+                "- Explains architecture, data flow, and design patterns\n"
+                "- Highlights important implementation details\n"
+                "- Points out any issues or potential improvements\n"
+                "- Uses markdown formatting (headers, lists, code blocks) "
+                "for readability\n"
+                "Be thorough — the user wants to understand the code, "
+                "not just a summary."
+            )
+        else:
+            instruction = (
+                "Summarize what was done in 2-5 concise bullet points. "
+                "If there are issues, flag them. "
+                "Do NOT use headers (no # or ##). "
+                "Keep it short and actionable."
+            )
+
         verification_prompt = (
             f"Original user request: {original_request}\n\n"
             f"Plan: {plan.description}\n\n"
             f"Worker Results:\n\n"
-            + "\n".join(results_summary)
-            + "\n\nSummarize what was done in 2-5 concise bullet points. "
-            "If there are issues, flag them. Do NOT repeat raw tool outputs or file contents. "
-            "Do NOT use headers (no # or ##). Keep it short and actionable."
+            f"{results_block}\n\n"
+            f"{instruction}"
         )
 
         system_prompt = get_orchestrator_prompt(self._cwd)
@@ -371,8 +409,9 @@ class Orchestrator:
         response = await self.client.collect_stream(
             messages=messages,
             model_role=ModelRole.PRO,
+            on_token=on_token,
         )
-        return response.get("content") or ""
+        return strip_dsml(response.get("content") or "")
 
     async def compact(self, on_token: Any = None) -> str:
         """Compress conversation history using Flash model to free context space."""
@@ -384,7 +423,7 @@ class Orchestrator:
             role = msg.get("role", "?")
             content = msg.get("content", "")
             if content:
-                history_text += f"[{role}]: {content[:500]}\n"
+                history_text += f"[{role}]: {content[:3000]}\n"
 
         compact_prompt = (
             "Summarize the following conversation history concisely. "

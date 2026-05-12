@@ -207,13 +207,13 @@ class ListFilesTool(Tool):
         try:
             files = sorted(dir_path.glob(pattern))
             entries = []
-            for f in files[:500]:
+            for f in files[:2000]:
                 rel = f.relative_to(dir_path)
                 prefix = "d " if f.is_dir() else "f "
                 entries.append(f"{prefix}{rel}")
             result = "\n".join(entries) if entries else "(empty)"
-            if len(files) > 500:
-                result += f"\n... ({len(files) - 500} more entries)"
+            if len(files) > 2000:
+                result += f"\n... ({len(files) - 2000} more entries)"
             return ToolResult.ok(result, total=len(files))
         except Exception as e:
             return ToolResult.error(f"Failed to list files: {e}")

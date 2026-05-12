@@ -588,7 +588,10 @@ class TaskProgressDisplay:
     def __init__(self, detail: str = "") -> None:
         self._task_states: dict[str, dict[str, str]] = {}
         self._task_tool_history: dict[str, list[dict[str, str]]] = {}
+        self._task_start_times: dict[str, float] = {}
+        self._task_end_times: dict[str, float] = {}
         self._live: Live | None = None
+        self._timer_task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
         self._detail = detail
         self._start_time = 0.0
@@ -613,37 +616,49 @@ class TaskProgressDisplay:
         for tid, state in self._task_states.items():
             status = state.get("status", "pending")
             detail = state.get("detail", "")
+            desc = state.get("desc", "")
             history = self._task_tool_history.get(tid, [])
 
+            task_time = ""
             if status in ("running", "retrying"):
                 icon = "⟳"
                 icon_style = "bold yellow"
-                info = detail or status
+                info = detail or "analyzing"
                 info_style = "yellow"
+                if tid in self._task_start_times:
+                    te = time.monotonic() - self._task_start_times[tid]
+                    task_time = f"  {_format_elapsed(te)}"
             elif status == "completed":
                 icon = "✓"
                 icon_style = "bold green"
                 n_tools = len(history)
-                if n_tools > 0:
-                    info = f"done ({n_tools} tools)"
-                else:
-                    info = "done"
+                info = f"done ({n_tools} tools)" if n_tools > 0 else "done"
                 info_style = "green"
+                s = self._task_start_times.get(tid, 0)
+                e = self._task_end_times.get(tid, 0)
+                if s and e:
+                    task_time = f"  {_format_elapsed(e - s)}"
             elif status == "failed":
                 icon = "✗"
                 icon_style = "bold red"
                 info = detail or "failed"
                 info_style = "red"
+                s = self._task_start_times.get(tid, 0)
+                e = self._task_end_times.get(tid, 0)
+                if s and e:
+                    task_time = f"  {_format_elapsed(e - s)}"
             else:
                 icon = "○"
                 icon_style = "dim"
-                info = "waiting"
+                info = desc if desc else "waiting"
                 info_style = "dim"
 
             result.append("    ")
             result.append(icon, style=icon_style)
             result.append(f" {tid}", style="cyan")
             result.append(f"  {info}", style=info_style)
+            if task_time:
+                result.append(task_time, style="dim")
             result.append("\n")
 
             if status in ("running", "retrying") and history:
@@ -698,6 +713,15 @@ class TaskProgressDisplay:
         if self._live:
             self._live.update(self._build_renderable())
 
+    async def _timer_loop(self) -> None:
+        try:
+            while True:
+                if self._live:
+                    self._live.update(self._build_renderable())
+                await asyncio.sleep(0.5)
+        except asyncio.CancelledError:
+            pass
+
     async def start(self, tasks: list[Any]) -> None:
         self._start_time = time.monotonic()
         for t in tasks:
@@ -714,25 +738,42 @@ class TaskProgressDisplay:
             transient=True,
         )
         self._live.start()
+        self._timer_task = asyncio.create_task(self._timer_loop())
 
     async def update(self, task_id: str, status: str, detail: str = "") -> None:
         async with self._lock:
             if task_id in self._task_states:
+                prev = self._task_states[task_id]["status"]
                 self._task_states[task_id]["status"] = status
                 if detail:
                     self._task_states[task_id]["detail"] = detail
+                if status in ("running", "retrying") and prev == "pending":
+                    self._task_start_times[task_id] = time.monotonic()
+                if status in ("completed", "failed") and task_id not in self._task_end_times:
+                    self._task_end_times[task_id] = time.monotonic()
             if self._live:
                 self._live.update(self._build_renderable())
 
     def pause(self) -> None:
+        if self._timer_task:
+            self._timer_task.cancel()
+            self._timer_task = None
         if self._live:
             self._live.stop()
 
     def resume(self) -> None:
         if self._live:
             self._live.start()
+            self._timer_task = asyncio.create_task(self._timer_loop())
 
     async def stop(self) -> None:
+        if self._timer_task:
+            self._timer_task.cancel()
+            try:
+                await self._timer_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._timer_task = None
         elapsed = time.monotonic() - self._start_time
         t = _format_elapsed(elapsed)
         if self._live:
@@ -749,18 +790,21 @@ class TaskProgressDisplay:
         for tid, state in self._task_states.items():
             status = state.get("status", "pending")
             history = self._task_tool_history.get(tid, [])
+            s = self._task_start_times.get(tid, 0)
+            e = self._task_end_times.get(tid, 0)
+            task_time = f"  [dim]{_format_elapsed(e - s)}[/dim]" if s and e else ""
             if status == "completed":
                 n = len(history)
                 ts = f" ({n} tools)" if n > 0 else ""
                 console.print(
                     f"    [green]✓[/green] [cyan]{tid}[/cyan]"
-                    f"  [green]done{ts}[/green]",
+                    f"  [green]done{ts}[/green]{task_time}",
                 )
             elif status == "failed":
                 detail = state.get("detail", "")
                 console.print(
                     f"    [red]✗[/red] [cyan]{tid}[/cyan]"
-                    f"  [red]{detail or 'failed'}[/red]",
+                    f"  [red]{detail or 'failed'}[/red]{task_time}",
                 )
 
 
@@ -818,19 +862,146 @@ def print_help_extended() -> None:
 
 
 class StreamPrinter:
-    """Accumulates streaming tokens and prints them."""
+    """Accumulates streaming tokens and renders as live Markdown.
 
-    def __init__(self, status_panel: StatusPanel | None = None) -> None:
+    Optional *phase* support: pass ``phase="verifying"`` to show a
+    PhaseSpinner-style animated header with real-time elapsed time while
+    waiting for the first token, then seamlessly switch to Markdown streaming.
+    """
+
+    _UPDATE_INTERVAL = 0.08
+
+    def __init__(
+        self,
+        status_panel: StatusPanel | None = None,
+        phase: str = "",
+        phase_detail: str = "",
+    ) -> None:
         self._buffer: list[str] = []
-        self._started = False
         self._status_panel = status_panel
+        self._live: Live | None = None
+        self._last_update = 0.0
+        self._committed_len = 0
+        # Phase header support
+        self._phase = phase
+        self._phase_detail = phase_detail.rstrip(".")
+        self._start = 0.0
+        self._phase_live: Live | None = None
+        self._phase_timer: asyncio.Task[None] | None = None
+        if phase:
+            self._start_phase()
+
+    def _render_phase(self) -> Text:
+        color, model = _PHASE_STYLES.get(self._phase, ("cyan", ""))
+        elapsed = time.monotonic() - self._start
+        n = int(elapsed / 0.5) % 3 + 1
+        t = _format_elapsed(elapsed)
+        line = Text()
+        line.append("\n  ")
+        line.append("●", style=color)
+        line.append(f" {self._phase.upper()}", style="bold")
+        line.append(f" ({model})", style="dim")
+        if self._phase_detail:
+            line.append(f"  {self._phase_detail}", style="dim")
+        line.append("." * n, style="dim")
+        line.append(f"  {t}", style="dim")
+        return line
+
+    def _start_phase(self) -> None:
+        self._start = time.monotonic()
+        self._phase_live = Live(
+            self._render_phase(),
+            console=console,
+            refresh_per_second=4,
+            transient=True,
+        )
+        self._phase_live.start()
+        self._phase_timer = asyncio.create_task(self._phase_loop())
+
+    async def _phase_loop(self) -> None:
+        try:
+            while True:
+                if self._phase_live:
+                    self._phase_live.update(self._render_phase())
+                await asyncio.sleep(0.3)
+        except asyncio.CancelledError:
+            pass
+
+    def _stop_phase(self) -> None:
+        if self._phase_timer:
+            self._phase_timer.cancel()
+            self._phase_timer = None
+        if self._phase_live:
+            try:
+                self._phase_live.stop()
+            except Exception:
+                pass
+            self._phase_live = None
+        if self._phase:
+            elapsed = time.monotonic() - self._start
+            t = _format_elapsed(elapsed)
+            color, model = _PHASE_STYLES.get(self._phase, ("cyan", ""))
+            detail_s = f"  [dim]{self._phase_detail}[/dim]" if self._phase_detail else ""
+            console.print(
+                f"\n  [{color}]●[/{color}] [bold]{self._phase.upper()}[/bold]"
+                f" [dim]({model})[/dim]{detail_s}  [dim]{t}[/dim]"
+            )
+
+    def _get_pending(self) -> str:
+        return self.get_content()[self._committed_len:]
+
+    def _safe_to_flush(self) -> bool:
+        pending = self._get_pending()
+        if pending.count("```") % 2 != 0:
+            return False
+        return pending.rstrip().endswith("\n")
+
+    def _flush(self) -> None:
+        if self._live:
+            self._live.stop()
+            self._live = None
+        pending = self._get_pending()
+        if pending.strip():
+            console.print()
+            console.print(Markdown(pending))
+        self._committed_len = len(self.get_content())
 
     async def on_token(self, token: str) -> None:
-        if not self._started:
-            console.print()
-            self._started = True
-        console.print(token, end="", highlight=False)
+        if self._phase_live:
+            self._stop_phase()
         self._buffer.append(token)
+
+        pending = self._get_pending()
+        term_h = shutil.get_terminal_size((80, 24)).lines
+
+        # Flush to console when content nears terminal height.
+        # This prevents Rich's Live display from overflowing the terminal.
+        # Live manages a fixed screen region — it never scrolls, so we must
+        # flush content to the real console where normal scrolling works.
+        if pending.count("\n") >= term_h - 8 and self._safe_to_flush():
+            self._flush()
+            return
+
+        # Force-flush safety valve: when pending content is very large,
+        # flush regardless of _safe_to_flush(). This prevents the screen
+        # from appearing "stuck" when long code fences or continuous text
+        # prevent safe-to-flush from returning True for too long.
+        if len(pending) > 3000:
+            self._flush()
+            return
+
+        if not self._live:
+            self._live = Live(
+                Markdown(""),
+                console=console,
+                refresh_per_second=8,
+                transient=True,
+            )
+            self._live.start()
+        now = time.monotonic()
+        if now - self._last_update >= self._UPDATE_INTERVAL:
+            self._last_update = now
+            self._live.update(Markdown(self._get_pending()))
         if self._status_panel:
             self._status_panel.refresh()
 
@@ -838,7 +1009,17 @@ class StreamPrinter:
         return "".join(self._buffer)
 
     def finish(self) -> None:
-        if self._started:
+        if self._phase_live:
+            self._stop_phase()
+        if self._live:
+            self._live.stop()
+            self._live = None
+        pending = self._get_pending()
+        if pending.strip():
+            console.print()
+            console.print(Markdown(pending))
+            console.print()
+        elif self._committed_len > 0:
             console.print()
 
 
