@@ -415,6 +415,87 @@ class PhaseSpinner:
         )
 
 
+class ReasoningStreamDisplay:
+    """Shows reasoning tokens in real-time during planning phase with elapsed timer."""
+
+    MAX_DISPLAY_CHARS = 200
+
+    def __init__(self) -> None:
+        self._start = 0.0
+        self._buffer: list[str] = []
+        self._total_chars = 0
+        self._live: Live | None = None
+        self._timer_task: asyncio.Task[None] | None = None
+
+    def _render(self) -> Text:
+        elapsed = time.monotonic() - self._start
+        t = _format_elapsed(elapsed)
+        color, model = _PHASE_STYLES.get("planning", ("blue", "Pro"))
+
+        line = Text()
+        line.append("\n  ")
+        line.append("●", style=color)
+        line.append(" PLANNING", style="bold")
+        line.append(f" ({model})", style="dim")
+        line.append(f"  {t}", style="dim")
+
+        tail = "".join(self._buffer)
+        if len(tail) > self.MAX_DISPLAY_CHARS:
+            tail = "..." + tail[-self.MAX_DISPLAY_CHARS:]
+        if tail:
+            display_lines = tail.strip().split("\n")
+            for dl in display_lines[-3:]:
+                line.append("\n    ")
+                line.append(dl.strip(), style="dim italic")
+        return line
+
+    async def _timer_loop(self) -> None:
+        try:
+            while True:
+                if self._live:
+                    self._live.update(self._render())
+                await asyncio.sleep(0.5)
+        except asyncio.CancelledError:
+            pass
+
+    async def start(self) -> None:
+        self._start = time.monotonic()
+        self._live = Live(
+            self._render(), console=console,
+            refresh_per_second=4, transient=True,
+        )
+        self._live.start()
+        self._timer_task = asyncio.create_task(self._timer_loop())
+
+    async def on_reasoning(self, token: str) -> None:
+        self._buffer.append(token)
+        self._total_chars += len(token)
+        if self._live:
+            self._live.update(self._render())
+
+    async def stop(self, interrupted: bool = False) -> None:
+        if self._timer_task:
+            self._timer_task.cancel()
+            try:
+                await self._timer_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        if self._live:
+            try:
+                self._live.stop()
+            except Exception:
+                pass
+            self._live = None
+        elapsed = time.monotonic() - self._start
+        t = _format_elapsed(elapsed)
+        color, model = _PHASE_STYLES.get("planning", ("blue", "Pro"))
+        int_s = " [yellow]interrupted[/yellow]" if interrupted else ""
+        console.print(
+            f"\n  [{color}]●[/{color}] [bold]PLANNING[/bold]"
+            f" [dim]({model})[/dim]  [dim]{t}[/dim]{int_s}"
+        )
+
+
 def print_plan_summary(plan_desc: str, tasks: list[dict[str, str]]) -> None:
     """Print a compact plan overview — one line per task, no box."""
     console.print(f"    [dim]{plan_desc}[/dim]")
@@ -460,10 +541,10 @@ class TaskProgressDisplay:
             status = state.get("status", "pending")
             detail = state.get("detail", "")
 
-            if status == "running":
+            if status in ("running", "retrying"):
                 icon = "⟳"
                 icon_style = "bold yellow"
-                info = detail or "running"
+                info = detail or status
                 info_style = "yellow"
             elif status == "completed":
                 icon = "✓"
@@ -513,6 +594,14 @@ class TaskProgressDisplay:
                     self._task_states[task_id]["detail"] = detail
             if self._live:
                 self._live.update(self._build_renderable())
+
+    def pause(self) -> None:
+        if self._live:
+            self._live.stop()
+
+    def resume(self) -> None:
+        if self._live:
+            self._live.start()
 
     async def stop(self) -> None:
         elapsed = time.monotonic() - self._start_time

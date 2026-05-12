@@ -340,7 +340,7 @@ async def _ask_approval(tool_name: str, arguments: str) -> bool:
             console.print(f"    File: {args['file_path']}")
     except (json.JSONDecodeError, KeyError):
         pass
-    console.print("  [dim]Allow? [y]es / [n]o / [a]lways[/dim] ", end="")
+    console.print("  [dim]Allow? \[y]es / \[n]o / \[a]lways[/dim] ", end="")
 
     loop = asyncio.get_event_loop()
     answer = await loop.run_in_executor(None, lambda: input().strip().lower())
@@ -413,6 +413,7 @@ async def _run_repl(config: Config) -> None:
     tool_registry = create_default_registry()
     orchestrator = Orchestrator(client, config, tool_registry)
     orchestrator.set_cwd(os.getcwd())
+    orchestrator.set_approve_handler(_ask_approval)
 
     status_panel = StatusPanel(client.usage)
     skills = create_default_skills()

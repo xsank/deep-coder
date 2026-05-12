@@ -13,6 +13,7 @@ from deep_coder.prompts.system import get_worker_prompt
 from deep_coder.tools.base import ToolRegistry
 
 OnWorkerStatus = Optional[Callable[[str, str, str], Coroutine[Any, Any, None]]]
+OnApprove = Optional[Callable[[str, str], Coroutine[Any, Any, bool]]]
 
 
 def _make_assistant_msg(response: dict[str, Any]) -> dict[str, Any]:
@@ -30,12 +31,18 @@ class Worker:
     def __init__(self, client: DeepSeekClient, tool_registry: ToolRegistry) -> None:
         self.client = client
         self.tool_registry = tool_registry
+        self._cwd: str | None = None
+
+    def set_cwd(self, cwd: str) -> None:
+        self._cwd = cwd
 
     async def execute(
         self,
         task: Task,
         on_status: Any = None,
         on_worker_status: OnWorkerStatus = None,
+        on_approve: OnApprove = None,
+        conversation_summary: str = "",
     ) -> str:
         task.mark_running()
         if on_status:
@@ -43,7 +50,10 @@ class Worker:
         if on_worker_status:
             await on_worker_status(task.id, "running", "starting")
 
-        system_prompt = get_worker_prompt(task.description, task.context)
+        system_prompt = get_worker_prompt(
+            task.description, task.context,
+            cwd=self._cwd, conversation_summary=conversation_summary,
+        )
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": task.description},
@@ -71,6 +81,17 @@ class Worker:
                         await on_worker_status(task.id, "running", f"tool: {tool_name}")
                     if on_status:
                         await on_status(task, f"tool:{tool_name}")
+
+                    tool_obj = self.tool_registry.get(tool_name)
+                    if on_approve and tool_obj and tool_obj.requires_approval:
+                        approved = await on_approve(tool_name, fn["arguments"])
+                        if not approved:
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc["id"],
+                                "content": "User denied this operation.",
+                            })
+                            continue
 
                     result = await self.tool_registry.dispatch(tool_name, fn["arguments"])
                     if result.success and result.metadata and "old_content" in result.metadata:

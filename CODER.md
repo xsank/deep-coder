@@ -1,152 +1,191 @@
-# Deep Coder — Project Overview
+# Deep Coder — CODER.md
 
-## Project Overview
+## 1. Project Overview
 
-**Deep Coder** is a cost-effective AI code assistant CLI tool powered by **DeepSeek V4**. It uses a **two-tier agent architecture**:
+**Deep Coder** (v0.1.0) is a cost-optimized AI code assistant that runs in the terminal. It uses **DeepSeek V4 Pro** as its "Orchestrator" (for planning & verification) and **DeepSeek V4 Flash** as its "Workers" (for parallel subtask execution). It provides a REPL with slash commands (`/review`, `/commit`, `/test`, `/fix`, `/think`, `/pr`, `/explain`), shell integration, inline diff display, and session management. Built for developer productivity — think of it as an open-source, terminal-native alternative to Claude Code / GitHub Copilot powered by DeepSeek.
 
-- **Orchestrator (V4 Pro)**: Handles planning, task decomposition, and result verification. It has *no direct tool access* — everything is delegated to workers.
-- **Workers (V4 Flash)**: Execute individual subtasks in parallel using a suite of file/shell/search tools. Fast and cost-efficient.
+**Key differentiator**: Two-tier architecture optimizes cost by using an expensive reasoning model for high-level thinking and a cheap model for the heavy-lifting tool execution.
 
-The user interacts via a REPL with slash commands (`/review`, `/commit`, `/fix`, `/think`, `/explain`, `/pr`, `/test`) and can also run shell commands inline with `! <cmd>`.
+License: **AGPL-3.0**
 
 ---
 
-## Tech Stack & Dependencies
+## 2. Tech Stack & Dependencies
 
-| Category | Technology |
+| Requirement | Value |
 |---|---|
-| **Language** | Python >= 3.10 |
-| **AI Models** | DeepSeek V4 Pro (planning/verification), DeepSeek V4 Flash (execution) |
-| **API Client** | `openai>=1.30.0` (OpenAI-compatible SDK for DeepSeek API) |
-| **Terminal UI** | `rich>=13.0.0` (markdown, panels, spinners, live display) |
-| **REPL** | `prompt-toolkit>=3.0.0` (autocomplete, history, vi mode) |
-| **Config** | `pydantic>=2.0.0`, `tomli>=2.0.0`, `tomli-w>=1.0.0` |
-| **HTTP** | `httpx>=0.27.0` |
-| **Linting** | `ruff>=0.4.0` (dev) |
-| **Testing** | `pytest>=8.0.0`, `pytest-asyncio>=0.23.0` (dev) |
-| **License** | AGPL-3.0 |
+| **Python** | `>=3.10` (tested on 3.10–3.13) |
+| **Build system** | setuptools + wheel |
+| **Linting** | ruff (line-length 100, target py310, rules E/F/I/W) |
+| **Testing** | pytest 8+, pytest-asyncio (asyncio_mode = "auto") |
+
+### Core Dependencies
+
+| Package | Version | Purpose |
+|---|---|---|
+| `openai` | >=1.30.0 | Async OpenAI-compatible API client for DeepSeek |
+| `rich` | >=13.0.0 | Terminal output: syntax highlighting, spinners, live displays |
+| `prompt-toolkit` | >=3.0.0 | REPL input: history, key bindings, tab completion |
+| `pydantic` | >=2.0.0 | Config data models with validation |
+| `httpx` | >=0.27.0 | Async HTTP (used by openai client under the hood) |
+| `tomli` (or `tomllib` on 3.11+) | >=2.0.0 | TOML config parsing |
+| `tomli-w` | >=1.0.0 | TOML config writing (save command) |
+
+### Dev Dependencies
+
+| Package | Purpose |
+|---|---|
+| `pytest>=8.0.0` | Test runner |
+| `pytest-asyncio>=0.23.0` | Async test support |
+| `ruff>=0.4.0` | Linter & formatter |
 
 ---
 
-## Directory Structure
+## 3. Directory Structure
 
 ```
 deep-coder/
-├── deep_coder/                      # Main source package
-│   ├── __init__.py                  # Package metadata (__version__ = "0.1.0")
-│   ├── __main__.py                  # `python -m deep_coder` entry point
-│   ├── cli.py                       # REPL loop, slash command dispatch, autocomplete
-│   ├── config.py                    # Config loading (TOML + env vars), Pydantic models
-│   ├── client.py                    # Async DeepSeek API client (OpenAI-compatible SDK)
-│   ├── models.py                    # Model definitions, role enums (Pro/Flash), registry
-│   ├── display.py                   # Rich terminal: banner, spinners, phase indicators, cost panel
-│   ├── agent/                       # Two-tier agent architecture
-│   │   ├── __init__.py
-│   │   ├── orchestrator.py          # Pro model: plans tasks, verifies results, compacts history
-│   │   ├── worker.py                # Flash model: executes single task with tool loop (max 15 iterations)
-│   │   └── task.py                  # Task & Plan data models (TaskStatus, dependency resolution)
-│   ├── tools/                       # Tool system (OpenAI function-calling compatible)
-│   │   ├── __init__.py
-│   │   ├── base.py                  # Tool ABC, ToolResult, SnapshotTracker (undo), ToolRegistry
-│   │   ├── file_ops.py              # read_file, write_file, edit_file, list_files
-│   │   ├── search.py                # grep_files (regex), glob_files (pattern)
-│   │   ├── shell.py                 # exec_shell (async subprocess with timeout)
-│   │   └── git.py                   # git_status, git_diff, git_log, git_commit
-│   ├── skills/                      # Developer slash-command skills
-│   │   ├── __init__.py              # SkillRegistry, create_default_skills()
-│   │   ├── base.py                  # Skill ABC, SkillContext, helper methods
-│   │   ├── review.py                # /review — AI code review of file or staged diff
-│   │   ├── commit.py                # /commit — Generate & commit with AI message
-│   │   ├── test_skill.py            # /test — Auto-detect framework, run tests, analyze failures
-│   │   ├── fix.py                   # /fix — Analyze error traceback and apply fix
-│   │   ├── think.py                 # /think — Deep reasoning for architecture questions
-│   │   ├── pr.py                    # /pr — Generate PR title/description from branch diff
-│   │   └── explain.py              # /explain — Explain a file, function, or project
-│   └── prompts/                     # System prompt templates (loaded as .txt files)
-│       ├── __init__.py
-│       ├── system.py                # get_orchestrator_prompt(), get_worker_prompt()
-│       ├── orchestrator.txt         # Pro model: role, task plan JSON format, verification rules
-│       └── worker.txt               # Flash model: role, available tools, response format
-├── tests/                           # Test suite
+├── pyproject.toml              # Project metadata, dependencies, scripts, tool config
+├── README.md                   # User-facing docs, installation, command reference
+├── CLAUDE.md                   # Claude Code guidance (mirrors arch info for AI assistants)
+├── LICENSE                     # AGPL-3.0 license
+├── .gitignore
+├── .deep-coder/
+│   └── config.toml             # Project-local config (gitignored) — API key, model settings
+├── .claude/
+│   └── settings.local.json     # Claude Code local settings
+├── deep_coder/                 # Main source package
+│   ├── __init__.py             # Package init — exports __version__ = "0.1.0"
+│   ├── __main__.py             # Entry point for `python -m deep_coder`
+│   ├── cli.py                  # REPL loop, command dispatch, shell integration, slash completer
+│   ├── config.py               # Config loading (global → local → env), pydantic models
+│   ├── client.py               # Async DeepSeek API client, token tracking, streaming
+│   ├── models.py               # ModelInfo, ModelRegistry, ModelRole enum (pro/flash)
+│   ├── display.py              # Rich terminal: spinners, streaming, diffs, panels
+│   ├── agent/                  # Two-tier agent system
+│   │   ├── orchestrator.py     # Pro model: planning, task decomposition, verification
+│   │   ├── worker.py           # Flash model: parallel subtask execution with tool access
+│   │   └── task.py             # Task/Plan dataclasses, TaskStatus enum
+│   ├── tools/                  # Tool system (agent tools accessible to workers)
+│   │   ├── base.py             # Tool ABC, ToolRegistry, ToolResult, snapshot tracker (undo)
+│   │   ├── file_ops.py         # read_file, write_file, edit_file, list_files
+│   │   ├── shell.py            # exec_shell — shell command execution
+│   │   ├── search.py           # grep_files, glob_files — search tools
+│   │   └── git.py              # git_status, git_diff, git_log, git_commit
+│   ├── skills/                 # Slash command skills
+│   │   ├── base.py             # Skill ABC, SkillContext dataclass, SkillRegistry
+│   │   ├── review.py           # /review — AI code review
+│   │   ├── commit.py           # /commit — smart commit messages
+│   │   ├── test_skill.py       # /test — run & analyze test failures
+│   │   ├── fix.py              # /fix — error diagnosis
+│   │   ├── think.py            # /think — deep reasoning
+│   │   ├── pr.py               # /pr — PR title & description
+│   │   └── explain.py          # /explain — code explanation
+│   └── prompts/                # System prompt templates
+│       ├── system.py           # Prompt loading & assembly (injects CODER.md context)
+│       ├── orchestrator.txt    # Orchestrator system prompt (planning agent)
+│       └── worker.txt          # Worker system prompt (execution agent)
+├── tests/                      # Test suite
 │   ├── __init__.py
-│   ├── test_client.py               # Client creation & model routing tests
-│   ├── test_orchestrator.py         # Task & Plan lifecycle, dependency resolution tests
-│   └── test_tools.py                # Tool registry, read/write/edit/grep/shell tests
-├── plugins/
-│   └── vscode/                      # Future VS Code extension placeholder
-├── pyproject.toml                   # Build config, dependencies, scripts, ruff/pytest settings
-├── README.md                        # User-facing documentation
-├── LICENSE                          # AGPL-3.0 license
-├── .gitignore                       # Standard Python + Deep Coder local config
-└── CODER.md                         # This file — AI assistant project guide
+│   ├── test_tools.py           # Tool system tests
+│   ├── test_client.py          # API client tests
+│   └── test_orchestrator.py    # Orchestrator tests
+└── plugins/                    # (empty) Plugin directory — not yet populated
 ```
 
 ---
 
-## Key Conventions Observed
+## 4. Key Conventions
 
-1. **`from __future__ import annotations`**: Used in almost every Python file for deferred evaluation of type hints.
-2. **Type hints**: All functions/methods are fully annotated using `typing` module (`Any`, `Optional`, `TYPE_CHECKING` for import guards).
-3. **Async-first**: All I/O operations are async (`asyncio`, `async/await`). Tools, client, and orchestrator all use async patterns.
-4. **`__init__.py` files**: Used for lazy imports in factory functions (e.g., `create_default_registry()`, `create_default_skills()` import inside functions to avoid circular dependencies).
-5. **Pydantic for config**: `Config`, `ModelConfig`, `AgentConfig` are Pydantic `BaseModel` subclasses with `Field()` defaults.
-6. **Dataclasses for data models**: `Task`, `Plan`, `ToolResult`, `FileSnapshot`, `UsageStats`, `SkillContext` use `@dataclass`.
-7. **Enum for states**: `ModelRole` (PRO/FLASH), `TaskStatus` (PENDING/RUNNING/COMPLETED/FAILED).
-8. **ABC for extensibility**: `Tool` and `Skill` are abstract base classes that new tools/skills extend via registration.
-9. **Config loading priority**: Global config → Project-local `.deep-coder/config.toml` → Environment variables (later overrides earlier).
-10. **Prompt-as-templates**: System prompts stored as `.txt` files in `prompts/` and loaded by `system.py`.
-11. **Linting**: `ruff` with line-length 100, target Python 3.10, selects E/F/I/W rules.
-12. **Testing**: `pytest` with `asyncio_mode = "auto"`, no need for `@pytest.mark.asyncio` (though some tests still use it explicitly).
+### Code Style
+- **`from __future__ import annotations`** — placed at the top of every `.py` file
+- **Full type annotations** on all function/method signatures
+- **Async-first** — all I/O operations are async (`async def`)
+- **Ruff linting** — line-length 100, target Python 3.10, rules `E/F/I/W` (pycodestyle, pyflakes, import sorting, pycodestyle warnings)
+
+### Naming
+- `snake_case` for functions, methods, variables
+- `PascalCase` for classes
+- `UPPER_CASE` for constants (e.g., `DEFAULT_BASE_URL`, `GLOBAL_CONFIG_DIR`)
+- Slash command names use `snake_case` for files: `test_skill.py`, `fix.py`
+
+### Architectural Patterns
+- **ABC + Registry pattern**: Abstract base classes (`Tool`, `Skill`) with lazy-loaded registries (`ToolRegistry`, `SkillRegistry`) via factory functions to avoid circular imports
+- **Pydantic `BaseModel`** for configuration objects (`ModelConfig`, `AgentConfig`, `Config`)
+- **`@dataclass`** for data transfer objects (`Task`, `Plan`, `ToolResult`, `SkillContext`, `UsageStats`)
+- **`Enum`** for fixed categories (`ModelRole`, `TaskStatus`)
+- **Lazy imports** inside factory functions (`create_default_registry()`, `create_default_skills()`) to avoid circular dependency issues
+- **Config priority**: global (`~/.deep-coder/config.toml`) → project-local (`.deep-coder/config.toml`) → environment variables (later overrides earlier)
+- **Snapshot tracking** in tool system enables `/diff` and `/undo` commands via file snapshots taken before modification
+
+### Project Structure Pattern
+- Flat package `deep_coder/` with subpackages for major concerns: `agent/`, `tools/`, `skills/`, `prompts/`
+- Each subpackage has its own `__init__.py` and `base.py` for the abstract foundation
 
 ---
 
-## Build / Test / Run Commands
+## 5. Build / Test / Run Commands
 
+### Installation
 ```bash
-# Install (editable)
+# Editable install (development)
 pip install -e .
 
-# Install with dev dependencies
+# With dev dependencies (pytest, ruff)
 pip install -e ".[dev]"
-
-# Run the CLI
-deep-coder
-
-# Or via Python module
-python -m deep_coder
-
-# Run tests
-pytest
-
-# Run tests with verbose output
-pytest -v
-
-# Run specific test file
-pytest tests/test_tools.py -v
-
-# Lint with ruff
-ruff check deep_coder/ tests/
-
-# Configuration
-export DEEPSEEK_API_KEY="your-api-key"
-# Or create .deep-coder/config.toml with your API key
 ```
 
-### Slash Commands Reference
-| Command | Description |
-|---|---|
-| `/review [file\|staged]` | AI code review |
-| `/commit [hint]` | Generate commit message & commit |
-| `/test [command]` | Run tests & analyze failures |
-| `/fix <error>` | Analyze error & fix root cause |
-| `/think <question>` | Deep reasoning for architecture |
-| `/pr [base]` | Generate PR description |
-| `/explain [file:lines]` | Explain code |
-| `/help` | Show all commands |
-| `/cost` | Show token usage & cost |
-| `/diff` | Show file changes |
-| `/undo` | Revert last change |
-| `/compact` | Compress conversation history |
-| `/init` | Generate CODER.md |
-| `/save` / `/resume` | Session management |
-| `! <command>` | Run shell command inline |
+### Run
+```bash
+# Via CLI script entry point
+deep-coder
+
+# Or via module
+python -m deep_coder
+```
+
+### Testing
+```bash
+# Run all tests
+pytest
+
+# Run a specific test file with verbose output
+pytest tests/test_tools.py -v
+
+# Tests use pytest-asyncio with asyncio_mode = "auto"
+# No @pytest.mark.asyncio decorator needed — just write async test functions
+```
+
+### Linting
+```bash
+# Check for lint errors
+ruff check deep_coder/ tests/
+
+# Auto-fix where possible
+ruff check deep_coder/ tests/ --fix
+```
+
+### Environment Setup
+```bash
+# Required: Set your DeepSeek API key
+export DEEPSEEK_API_KEY="sk-your-key-here"
+
+# Optional: Custom base URL
+export DEEPSEEK_BASE_URL="https://api.deepseek.com"
+```
+
+### Config File (Alternative to env vars)
+```toml
+# .deep-coder/config.toml
+[model]
+api_key = "sk-your-key-here"
+pro_model = "deepseek-v4-pro"
+flash_model = "deepseek-v4-flash"
+base_url = "https://api.deepseek.com"
+max_tokens = 8192
+temperature = 0.0
+
+[agent]
+max_workers = 5
+worker_timeout = 120
+```

@@ -186,6 +186,7 @@ class DeepSeekClient:
         model_role: ModelRole = ModelRole.FLASH,
         tools: Optional[list[dict[str, Any]]] = None,
         on_token: Optional[Any] = None,
+        on_reasoning: Optional[Any] = None,
     ) -> dict[str, Any]:
         """Stream a response and collect the full result, calling on_token for each text delta."""
         content_parts: list[str] = []
@@ -205,6 +206,8 @@ class DeepSeekClient:
             reasoning_content = getattr(delta, "reasoning_content", None)
             if reasoning_content:
                 reasoning_parts.append(reasoning_content)
+                if on_reasoning:
+                    await on_reasoning(reasoning_content)
 
             if delta.content:
                 content_parts.append(delta.content)

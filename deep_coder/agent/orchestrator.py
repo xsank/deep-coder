@@ -8,11 +8,12 @@ import re
 from typing import Any, Optional
 
 from deep_coder.agent.task import Plan, Task, TaskStatus
-from deep_coder.agent.worker import Worker
+from deep_coder.agent.worker import OnApprove, Worker
 from deep_coder.client import DeepSeekClient
 from deep_coder.config import Config
 from deep_coder.display import (
     PhaseSpinner,
+    ReasoningStreamDisplay,
     TaskProgressDisplay,
     console,
     print_plan_summary,
@@ -22,9 +23,29 @@ from deep_coder.prompts.system import get_orchestrator_prompt
 from deep_coder.tools.base import ToolRegistry
 
 
+_DSML_TAG_RE = re.compile(r"</?[｜|]*DSML[｜|]*[^>]*>")
+
+
+def _strip_dsml(content: str) -> str:
+    """Remove DeepSeek internal markup (DSML tags) leaked into text content."""
+    if "DSML" not in content:
+        return content
+    first = last = None
+    for m in _DSML_TAG_RE.finditer(content):
+        if first is None:
+            first = m.start()
+        last = m.end()
+    if first is not None and last is not None:
+        content = content[:first] + content[last:]
+    return content.strip()
+
+
 def _make_assistant_msg(response: dict[str, Any]) -> dict[str, Any]:
     """Build an assistant message dict, preserving reasoning_content if present."""
-    msg: dict[str, Any] = {"role": "assistant", "content": response.get("content")}
+    content = response.get("content")
+    if content:
+        content = _strip_dsml(content)
+    msg: dict[str, Any] = {"role": "assistant", "content": content}
     if response.get("reasoning_content"):
         msg["reasoning_content"] = response["reasoning_content"]
     if response.get("tool_calls"):
@@ -42,9 +63,14 @@ class Orchestrator:
         self.worker = Worker(client, tool_registry)
         self.conversation: list[dict[str, Any]] = []
         self._cwd: Optional[str] = None
+        self._on_approve: OnApprove = None
 
     def set_cwd(self, cwd: str) -> None:
         self._cwd = cwd
+        self.worker.set_cwd(cwd)
+
+    def set_approve_handler(self, handler: OnApprove) -> None:
+        self._on_approve = handler
 
     async def process(
         self,
@@ -57,22 +83,26 @@ class Orchestrator:
         system_prompt = get_orchestrator_prompt(self._cwd)
         messages = [{"role": "system", "content": system_prompt}] + self.conversation
 
+        reasoning_display = ReasoningStreamDisplay()
         try:
-            async with PhaseSpinner("planning", "analyzing request"):
-                response = await self.client.collect_stream(
-                    messages=messages,
-                    model_role=ModelRole.PRO,
-                    on_token=None,
-                )
+            await reasoning_display.start()
+            response = await self.client.collect_stream(
+                messages=messages,
+                model_role=ModelRole.PRO,
+                on_token=None,
+                on_reasoning=reasoning_display.on_reasoning,
+            )
+            await reasoning_display.stop()
         except (KeyboardInterrupt, asyncio.CancelledError):
+            await reasoning_display.stop(interrupted=True)
             raise KeyboardInterrupt("Interrupted during planning")
 
-        content = response.get("content") or ""
+        content = _strip_dsml(response.get("content") or "")
 
         plan = self._try_extract_plan(content)
         if plan and len(plan.tasks) > 0:
             plan_tasks_info = [
-                {"id": t.id, "desc": t.description[:60], "deps": t.depends_on}
+                {"id": t.id, "desc": t.description[:128] + ("..." if len(t.description) > 128 else ""), "deps": t.depends_on}
                 for t in plan.tasks
             ]
             print_plan_summary(plan.description, plan_tasks_info)
@@ -117,6 +147,19 @@ class Orchestrator:
             pass
         return None
 
+    def _build_conversation_summary(self, max_exchanges: int = 5) -> str:
+        """Build a compact summary of recent conversation for worker context."""
+        recent = self.conversation[-(max_exchanges * 2):]
+        parts: list[str] = []
+        for msg in recent:
+            role = msg.get("role", "")
+            content = msg.get("content", "") or ""
+            if not content or role == "system":
+                continue
+            truncated = content[:300] + ("..." if len(content) > 300 else "")
+            parts.append(f"[{role}]: {truncated}")
+        return "\n".join(parts) if parts else ""
+
     async def _execute_plan_with_progress(self, plan: Plan, n_tasks: int = 0) -> None:
         """Execute plan with live progress display showing all task states."""
         detail = f"{n_tasks} task{'s' if n_tasks > 1 else ''}" if n_tasks else ""
@@ -124,9 +167,20 @@ class Orchestrator:
         await progress.start(plan.tasks)
 
         max_concurrent = self.config.agent.max_workers
+        approve_lock = asyncio.Lock()
 
         async def on_worker_status(task_id: str, status: str, detail: str) -> None:
             await progress.update(task_id, status, detail)
+
+        async def on_approve_with_pause(tool_name: str, arguments: str) -> bool:
+            if not self._on_approve:
+                return True
+            async with approve_lock:
+                progress.pause()
+                try:
+                    return await self._on_approve(tool_name, arguments)
+                finally:
+                    progress.resume()
 
         try:
             while not plan.is_complete:
@@ -135,17 +189,48 @@ class Orchestrator:
                     break
 
                 batch = ready[:max_concurrent]
+                completed_tasks = {t.id: t for t in plan.tasks if t.status == TaskStatus.COMPLETED}
+                for task in batch:
+                    if task.depends_on:
+                        dep_results = []
+                        for dep_id in task.depends_on:
+                            dep = completed_tasks.get(dep_id)
+                            if dep and dep.result:
+                                dep_results.append(f"[{dep_id}]: {dep.result[:500]}")
+                        if dep_results:
+                            task.context += "\n\nCompleted dependency results:\n" + "\n".join(dep_results)
                 coros = [
-                    self._run_worker(task, on_worker_status=on_worker_status)
+                    self._run_worker(
+                        task, on_worker_status=on_worker_status,
+                        on_approve=on_approve_with_pause,
+                    )
                     for task in batch
                 ]
                 await asyncio.gather(*coros)
+
+            failed_tasks = [t for t in plan.tasks if t.status == TaskStatus.FAILED and t.retry_count == 0]
+            if failed_tasks:
+                for task in failed_tasks:
+                    task.mark_retrying()
+                    task.context += f"\n\nPrevious attempt failed with error: {task.error}\nPlease try a different approach."
+                    await on_worker_status(task.id, "running", "retrying")
+                retry_coros = [
+                    self._run_worker(
+                        task, on_worker_status=on_worker_status,
+                        on_approve=on_approve_with_pause,
+                    )
+                    for task in failed_tasks
+                ]
+                await asyncio.gather(*retry_coros)
         finally:
             await progress.stop()
 
         completed = sum(1 for t in plan.tasks if t.status == TaskStatus.COMPLETED)
         failed = sum(1 for t in plan.tasks if t.status == TaskStatus.FAILED)
+        retried = sum(1 for t in plan.tasks if t.retry_count > 0 and t.status == TaskStatus.COMPLETED)
         summary_parts = [f"[green]{completed} completed[/green]"]
+        if retried:
+            summary_parts.append(f"[yellow]{retried} recovered[/yellow]")
         if failed:
             summary_parts.append(f"[red]{failed} failed[/red]")
         console.print(f"  [dim]Results:[/dim] {', '.join(summary_parts)}\n")
@@ -155,9 +240,16 @@ class Orchestrator:
         task: Task,
         on_status: Any = None,
         on_worker_status: Any = None,
+        on_approve: OnApprove = None,
     ) -> None:
         try:
-            await self.worker.execute(task, on_status=on_status, on_worker_status=on_worker_status)
+            await self.worker.execute(
+                task,
+                on_status=on_status,
+                on_worker_status=on_worker_status,
+                on_approve=on_approve or self._on_approve,
+                conversation_summary=self._build_conversation_summary(),
+            )
         except Exception as e:
             task.mark_failed(str(e))
             if on_worker_status:

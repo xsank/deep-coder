@@ -12,6 +12,7 @@ class TaskStatus(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    RETRYING = "retrying"
 
 
 @dataclass
@@ -24,6 +25,7 @@ class Task:
     status: TaskStatus = TaskStatus.PENDING
     result: Optional[str] = None
     error: Optional[str] = None
+    retry_count: int = 0
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Task:
@@ -50,6 +52,11 @@ class Task:
         self.status = TaskStatus.FAILED
         self.error = error
 
+    def mark_retrying(self) -> None:
+        self.status = TaskStatus.RETRYING
+        self.retry_count += 1
+        self.error = None
+
 
 @dataclass
 class Plan:
@@ -75,7 +82,10 @@ class Plan:
 
     @property
     def is_complete(self) -> bool:
-        return all(t.status in (TaskStatus.COMPLETED, TaskStatus.FAILED) for t in self.tasks)
+        return all(
+            t.status in (TaskStatus.COMPLETED, TaskStatus.FAILED)
+            for t in self.tasks
+        )
 
     @property
     def failed_tasks(self) -> list[Task]:
