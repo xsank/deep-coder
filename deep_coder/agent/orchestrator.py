@@ -110,7 +110,10 @@ class Orchestrator:
             self.conversation.append({"role": "assistant", "content": content})
             return content
 
-        system_prompt = get_orchestrator_prompt(self._cwd)
+        from deep_coder.context import collect_project_context
+        project_ctx = await collect_project_context(self._cwd)
+
+        system_prompt = get_orchestrator_prompt(self._cwd, project_context=project_ctx)
         messages = [{"role": "system", "content": system_prompt}] + self.conversation
 
         reasoning_display = ReasoningStreamDisplay()

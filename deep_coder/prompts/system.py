@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 PROMPTS_DIR = Path(__file__).parent
 
@@ -42,11 +43,18 @@ def _load_memories(cwd: str | None) -> str | None:
     return store.get_prompt_section(max_chars=MAX_MEMORY_CHARS)
 
 
-def get_orchestrator_prompt(cwd: str | None = None) -> str:
+def get_orchestrator_prompt(
+    cwd: str | None = None,
+    project_context: Any = None,
+) -> str:
     base = load_prompt("orchestrator")
     context_parts = [base]
     if cwd:
         context_parts.append(f"\n## Current Working Directory\n{cwd}")
+    if project_context:
+        context_parts.append(
+            f"\n## Project Status\n{project_context.format_for_prompt()}"
+        )
     coder_md = _find_coder_md(cwd)
     if coder_md:
         context_parts.append(f"\n## Project Context (CODER.md)\n{coder_md}")
