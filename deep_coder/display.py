@@ -204,17 +204,107 @@ def print_task_status(task_id: str | None, status: str) -> None:
             console.print(f"  [error]Worker failed: {task_id} — {msg}[/error]")
 
 
+def _format_elapsed(seconds: float) -> str:
+    """Format seconds as human-friendly time string."""
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    m, s = divmod(int(seconds), 60)
+    return f"{m}m {s}s"
+
+
+_PHASE_STYLES: dict[str, tuple[str, str]] = {
+    "planning": ("blue", "Pro"),
+    "executing": ("yellow", "Flash"),
+    "verifying": ("green", "Pro"),
+}
+
+
 def print_phase(phase: str, detail: str = "") -> None:
     """Print a compact phase indicator — like Claude Code's step markers."""
-    styles = {
-        "planning": ("blue", "Pro"),
-        "executing": ("yellow", "Flash"),
-        "verifying": ("green", "Pro"),
-    }
-    color, model = styles.get(phase, ("cyan", ""))
+    color, model = _PHASE_STYLES.get(phase, ("cyan", ""))
     model_tag = f" [dim]({model})[/dim]" if model else ""
     suffix = f"  [dim]{detail}[/dim]" if detail else ""
     console.print(f"\n  [{color}]●[/{color}] [bold]{phase.upper()}[/bold]{model_tag}{suffix}")
+
+
+class PhaseSpinner:
+    """Animated phase indicator with cycling dots and elapsed time.
+
+    Usage::
+
+        async with PhaseSpinner("planning", "analyzing request"):
+            await long_running_call()
+    """
+
+    def __init__(self, phase: str, detail: str = "") -> None:
+        self._phase = phase
+        self._detail = detail.rstrip(".")
+        self._start = 0.0
+        self._live: Live | None = None
+        self._update_task: asyncio.Task[None] | None = None
+
+    def _render(self, dots: str = "") -> Text:
+        color, model = _PHASE_STYLES.get(self._phase, ("cyan", ""))
+        elapsed = time.monotonic() - self._start
+        t = _format_elapsed(elapsed)
+
+        line = Text()
+        line.append("\n  ")
+        line.append("●", style=color)
+        line.append(f" {self._phase.upper()}", style="bold")
+        line.append(f" ({model})", style="dim")
+        if self._detail:
+            line.append(f"  {self._detail}", style="dim")
+        if dots:
+            line.append(dots, style="dim")
+        line.append(f"  {t}", style="dim")
+        return line
+
+    async def _animation_loop(self) -> None:
+        try:
+            while True:
+                elapsed = time.monotonic() - self._start
+                n = int(elapsed / 0.5) % 3 + 1
+                if self._live:
+                    self._live.update(self._render("." * n))
+                await asyncio.sleep(0.3)
+        except asyncio.CancelledError:
+            pass
+
+    async def __aenter__(self) -> PhaseSpinner:
+        self._start = time.monotonic()
+        self._live = Live(
+            self._render("."),
+            console=console,
+            refresh_per_second=4,
+            transient=True,
+        )
+        self._live.start()
+        self._update_task = asyncio.create_task(self._animation_loop())
+        return self
+
+    async def __aexit__(self, exc_type: Any, *args: Any) -> None:
+        if self._update_task:
+            self._update_task.cancel()
+            try:
+                await self._update_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        if self._live:
+            try:
+                self._live.stop()
+            except Exception:
+                pass
+            self._live = None
+        elapsed = time.monotonic() - self._start
+        t = _format_elapsed(elapsed)
+        color, model = _PHASE_STYLES.get(self._phase, ("cyan", ""))
+        detail_s = f"  [dim]{self._detail}[/dim]" if self._detail else ""
+        interrupted = " [yellow]interrupted[/yellow]" if exc_type else ""
+        console.print(
+            f"\n  [{color}]●[/{color}] [bold]{self._phase.upper()}[/bold]"
+            f" [dim]({model})[/dim]{detail_s}  [dim]{t}[/dim]{interrupted}"
+        )
 
 
 def print_plan_summary(plan_desc: str, tasks: list[dict[str, str]]) -> None:
@@ -230,17 +320,34 @@ def print_plan_summary(plan_desc: str, tasks: list[dict[str, str]]) -> None:
 
 
 class TaskProgressDisplay:
-    """Compact inline progress for parallel task execution — no heavy panels."""
+    """Compact inline progress for parallel task execution with animated header."""
 
     REFRESH_PER_SECOND = 4
 
-    def __init__(self) -> None:
+    def __init__(self, detail: str = "") -> None:
         self._task_states: dict[str, dict[str, str]] = {}
         self._live: Live | None = None
         self._lock = asyncio.Lock()
+        self._detail = detail
+        self._start_time = 0.0
 
     def _build_renderable(self) -> Text:
+        elapsed = time.monotonic() - self._start_time
+        n = int(elapsed / 0.5) % 3 + 1
+        dots = "." * n
+        t = _format_elapsed(elapsed)
+
         result = Text()
+        result.append("  ")
+        result.append("●", style="bold yellow")
+        result.append(" EXECUTING", style="bold")
+        result.append(" (Flash)", style="dim")
+        if self._detail:
+            result.append(f"  {self._detail}", style="dim")
+        result.append(f"{dots:<3s}", style="dim")
+        result.append(f"  {t}", style="dim")
+        result.append("\n")
+
         for tid, state in self._task_states.items():
             status = state.get("status", "pending")
             detail = state.get("detail", "")
@@ -275,6 +382,7 @@ class TaskProgressDisplay:
         return result
 
     async def start(self, tasks: list[Any]) -> None:
+        self._start_time = time.monotonic()
         for t in tasks:
             self._task_states[t.id] = {
                 "status": "pending",
@@ -299,10 +407,19 @@ class TaskProgressDisplay:
                 self._live.update(self._build_renderable())
 
     async def stop(self) -> None:
+        elapsed = time.monotonic() - self._start_time
+        t = _format_elapsed(elapsed)
         if self._live:
-            self._live.update(self._build_renderable())
-            self._live.stop()
+            try:
+                self._live.stop()
+            except Exception:
+                pass
             self._live = None
+        detail_s = f"  [dim]{self._detail}[/dim]" if self._detail else ""
+        console.print(
+            f"\n  [yellow]●[/yellow] [bold]EXECUTING[/bold]"
+            f" [dim](Flash)[/dim]{detail_s}  [dim]{t}[/dim]"
+        )
         for tid, state in self._task_states.items():
             status = state.get("status", "pending")
             if status == "completed":

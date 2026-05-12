@@ -12,9 +12,9 @@ from deep_coder.agent.worker import Worker
 from deep_coder.client import DeepSeekClient
 from deep_coder.config import Config
 from deep_coder.display import (
+    PhaseSpinner,
     TaskProgressDisplay,
     console,
-    print_phase,
     print_plan_summary,
 )
 from deep_coder.models import ModelRole
@@ -57,13 +57,15 @@ class Orchestrator:
         system_prompt = get_orchestrator_prompt(self._cwd)
         messages = [{"role": "system", "content": system_prompt}] + self.conversation
 
-        print_phase("planning", "analyzing request...")
-
-        response = await self.client.collect_stream(
-            messages=messages,
-            model_role=ModelRole.PRO,
-            on_token=None,
-        )
+        try:
+            async with PhaseSpinner("planning", "analyzing request"):
+                response = await self.client.collect_stream(
+                    messages=messages,
+                    model_role=ModelRole.PRO,
+                    on_token=None,
+                )
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            raise KeyboardInterrupt("Interrupted during planning")
 
         content = response.get("content") or ""
 
@@ -76,11 +78,17 @@ class Orchestrator:
             print_plan_summary(plan.description, plan_tasks_info)
 
             n = len(plan.tasks)
-            print_phase("executing", f"{n} task{'s' if n > 1 else ''}")
-            await self._execute_plan_with_progress(plan)
+            try:
+                await self._execute_plan_with_progress(plan, n)
+            except (KeyboardInterrupt, asyncio.CancelledError):
+                raise KeyboardInterrupt("Interrupted during execution")
 
-            print_phase("verifying", "reviewing results...")
-            verification = await self._verify_results(plan, user_message)
+            try:
+                async with PhaseSpinner("verifying", "reviewing results"):
+                    verification = await self._verify_results(plan, user_message)
+            except (KeyboardInterrupt, asyncio.CancelledError):
+                raise KeyboardInterrupt("Interrupted during verification")
+
             self.conversation.append({"role": "assistant", "content": verification})
             from deep_coder.display import Markdown as RichMarkdown
             console.print()
@@ -109,9 +117,10 @@ class Orchestrator:
             pass
         return None
 
-    async def _execute_plan_with_progress(self, plan: Plan) -> None:
+    async def _execute_plan_with_progress(self, plan: Plan, n_tasks: int = 0) -> None:
         """Execute plan with live progress display showing all task states."""
-        progress = TaskProgressDisplay()
+        detail = f"{n_tasks} task{'s' if n_tasks > 1 else ''}" if n_tasks else ""
+        progress = TaskProgressDisplay(detail=detail)
         await progress.start(plan.tasks)
 
         max_concurrent = self.config.agent.max_workers

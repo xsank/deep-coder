@@ -151,7 +151,7 @@ class CommandHandler:
                 )
                 try:
                     await skill.execute(arg, skill_ctx)
-                except KeyboardInterrupt:
+                except (KeyboardInterrupt, asyncio.CancelledError):
                     print_warning("\nInterrupted.")
                 except Exception as e:
                     print_error(f"Skill failed: {e}")
@@ -384,6 +384,9 @@ async def _run_shell_command(command: str) -> None:
         print_error(f"Shell error: {e}")
 
 
+_DOUBLE_CTRL_C_WINDOW = 2.0
+
+
 async def _run_repl(config: Config) -> None:
     GLOBAL_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -413,13 +416,24 @@ async def _run_repl(config: Config) -> None:
             "or add it to .deep-coder/config.toml"
         )
 
+    last_interrupt = 0.0
+
     while True:
         try:
             user_input = await session.prompt_async(
                 "you> ",
                 vi_mode=cmd_handler.vi_mode,
             )
-        except (EOFError, KeyboardInterrupt):
+            last_interrupt = 0.0
+        except KeyboardInterrupt:
+            now = time.time()
+            if now - last_interrupt < _DOUBLE_CTRL_C_WINDOW:
+                print_info("\nGoodbye!")
+                break
+            last_interrupt = now
+            print_warning("\nPress Ctrl+C again to exit.")
+            continue
+        except EOFError:
             print_info("\nGoodbye!")
             break
 
@@ -463,9 +477,10 @@ async def _run_repl(config: Config) -> None:
             if not printer.get_content() and result:
                 print_response(result)
 
-        except KeyboardInterrupt:
+        except (KeyboardInterrupt, asyncio.CancelledError):
             printer.finish()
             print_warning("\nInterrupted.")
+            last_interrupt = time.time()
         except Exception as e:
             printer.finish()
             print_error(f"Request failed: {e}")
@@ -495,7 +510,10 @@ def main() -> None:
         return
 
     config = Config.load()
-    asyncio.run(_run_repl(config))
+    try:
+        asyncio.run(_run_repl(config))
+    except KeyboardInterrupt:
+        pass
 
 
 if __name__ == "__main__":
