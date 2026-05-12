@@ -6,6 +6,7 @@ import asyncio
 import difflib
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -316,6 +317,33 @@ async def _ask_approval(tool_name: str, arguments: str) -> bool:
     return answer in ("y", "yes", "a", "always")
 
 
+async def _run_shell_command(command: str) -> None:
+    """Execute a shell command and display output inline."""
+    console.print(f"  [dim]$[/dim] {command}")
+    loop = asyncio.get_event_loop()
+    try:
+        result = await loop.run_in_executor(
+            None,
+            lambda: subprocess.run(
+                command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            ),
+        )
+        if result.stdout:
+            console.print(result.stdout, end="", highlight=False)
+        if result.stderr:
+            console.print(f"[dim]{result.stderr}[/dim]", end="", highlight=False)
+        if result.returncode != 0:
+            console.print(f"  [dim]exit code {result.returncode}[/dim]")
+    except subprocess.TimeoutExpired:
+        print_error("Command timed out (120s limit).")
+    except Exception as e:
+        print_error(f"Shell error: {e}")
+
+
 async def _run_repl(config: Config) -> None:
     GLOBAL_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -362,6 +390,14 @@ async def _run_repl(config: Config) -> None:
                 break
             continue
 
+        if text.startswith("!"):
+            shell_cmd = text[1:].strip()
+            if shell_cmd:
+                await _run_shell_command(shell_cmd)
+            else:
+                print_warning("Usage: ! <command>  (e.g. ! ls -la)")
+            continue
+
         if not config.has_api_key:
             print_error("API key not configured. Set DEEPSEEK_API_KEY or use /config.")
             continue
@@ -381,7 +417,7 @@ async def _run_repl(config: Config) -> None:
             printer.finish()
             status_panel.refresh(force=True)
 
-            if not printer.get_content():
+            if not printer.get_content() and result:
                 print_response(result)
 
         except KeyboardInterrupt:

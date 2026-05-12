@@ -11,6 +11,12 @@ from deep_coder.agent.task import Plan, Task, TaskStatus
 from deep_coder.agent.worker import Worker
 from deep_coder.client import DeepSeekClient
 from deep_coder.config import Config
+from deep_coder.display import (
+    TaskProgressDisplay,
+    console,
+    print_phase,
+    print_plan_summary,
+)
 from deep_coder.models import ModelRole
 from deep_coder.prompts.system import get_orchestrator_prompt
 from deep_coder.tools.base import ToolRegistry
@@ -50,72 +56,44 @@ class Orchestrator:
 
         system_prompt = get_orchestrator_prompt(self._cwd)
         messages = [{"role": "system", "content": system_prompt}] + self.conversation
-        tools = self.tool_registry.to_openai_tools()
+
+        print_phase("planning", "analyzing request...")
 
         response = await self.client.collect_stream(
             messages=messages,
             model_role=ModelRole.PRO,
-            tools=tools,
-            on_token=on_token,
+            on_token=None,
         )
-
-        if response.get("tool_calls"):
-            result = await self._handle_tool_calls(response, messages, tools, on_token, on_status)
-            self.conversation.append({"role": "assistant", "content": result})
-            return result
 
         content = response.get("content") or ""
 
         plan = self._try_extract_plan(content)
         if plan and len(plan.tasks) > 0:
-            if on_status:
-                await on_status(None, f"plan:{len(plan.tasks)} tasks")
+            plan_tasks_info = [
+                {"id": t.id, "desc": t.description[:60], "deps": t.depends_on}
+                for t in plan.tasks
+            ]
+            print_plan_summary(plan.description, plan_tasks_info)
 
-            await self._execute_plan(plan, on_status)
-            verification = await self._verify_results(plan, user_message, on_token)
+            n = len(plan.tasks)
+            print_phase("executing", f"{n} task{'s' if n > 1 else ''}")
+            await self._execute_plan_with_progress(plan)
+
+            print_phase("verifying", "reviewing results...")
+            verification = await self._verify_results(plan, user_message)
             self.conversation.append({"role": "assistant", "content": verification})
-            return verification
+            from deep_coder.display import Markdown as RichMarkdown
+            console.print()
+            console.print(RichMarkdown(verification))
+            console.print()
+            return ""
+
+        if on_token and content:
+            for char in content:
+                await on_token(char)
 
         self.conversation.append(_make_assistant_msg(response))
         return content
-
-    async def _handle_tool_calls(
-        self,
-        response: dict[str, Any],
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]],
-        on_token: Any = None,
-        on_status: Any = None,
-    ) -> str:
-        messages_copy = list(messages)
-        current_response = response
-        max_rounds = 10
-
-        for _ in range(max_rounds):
-            if not current_response.get("tool_calls"):
-                return current_response.get("content") or ""
-
-            messages_copy.append(_make_assistant_msg(current_response))
-
-            for tc in current_response["tool_calls"]:
-                fn = tc["function"]
-                if on_status:
-                    await on_status(None, f"tool:{fn['name']}")
-                result = await self.tool_registry.dispatch(fn["name"], fn["arguments"])
-                messages_copy.append({
-                    "role": "tool",
-                    "tool_call_id": tc["id"],
-                    "content": result.content,
-                })
-
-            current_response = await self.client.collect_stream(
-                messages=messages_copy,
-                model_role=ModelRole.PRO,
-                tools=tools,
-                on_token=on_token,
-            )
-
-        return current_response.get("content") or ""
 
     def _try_extract_plan(self, content: str) -> Optional[Plan]:
         json_match = re.search(r"```json\s*(\{.*?\})\s*```", content, re.DOTALL)
@@ -131,31 +109,55 @@ class Orchestrator:
             pass
         return None
 
-    async def _execute_plan(self, plan: Plan, on_status: Any = None) -> None:
+    async def _execute_plan_with_progress(self, plan: Plan) -> None:
+        """Execute plan with live progress display showing all task states."""
+        progress = TaskProgressDisplay()
+        await progress.start(plan.tasks)
+
         max_concurrent = self.config.agent.max_workers
 
-        while not plan.is_complete:
-            ready = plan.get_ready_tasks()
-            if not ready:
-                break
+        async def on_worker_status(task_id: str, status: str, detail: str) -> None:
+            await progress.update(task_id, status, detail)
 
-            batch = ready[:max_concurrent]
-            tasks = [self._run_worker(task, on_status) for task in batch]
-            await asyncio.gather(*tasks)
-
-    async def _run_worker(self, task: Task, on_status: Any = None) -> None:
         try:
-            await self.worker.execute(task, on_status)
+            while not plan.is_complete:
+                ready = plan.get_ready_tasks()
+                if not ready:
+                    break
+
+                batch = ready[:max_concurrent]
+                coros = [
+                    self._run_worker(task, on_worker_status=on_worker_status)
+                    for task in batch
+                ]
+                await asyncio.gather(*coros)
+        finally:
+            await progress.stop()
+
+        completed = sum(1 for t in plan.tasks if t.status == TaskStatus.COMPLETED)
+        failed = sum(1 for t in plan.tasks if t.status == TaskStatus.FAILED)
+        summary_parts = [f"[green]{completed} completed[/green]"]
+        if failed:
+            summary_parts.append(f"[red]{failed} failed[/red]")
+        console.print(f"  [dim]Results:[/dim] {', '.join(summary_parts)}\n")
+
+    async def _run_worker(
+        self,
+        task: Task,
+        on_status: Any = None,
+        on_worker_status: Any = None,
+    ) -> None:
+        try:
+            await self.worker.execute(task, on_status=on_status, on_worker_status=on_worker_status)
         except Exception as e:
             task.mark_failed(str(e))
-            if on_status:
-                await on_status(task, f"failed:{e}")
+            if on_worker_status:
+                await on_worker_status(task.id, "failed", str(e)[:60])
 
     async def _verify_results(
         self,
         plan: Plan,
         original_request: str,
-        on_token: Any = None,
     ) -> str:
         results_summary = []
         for task in plan.tasks:
@@ -168,13 +170,13 @@ class Orchestrator:
             )
 
         verification_prompt = (
-            f"## Verification Request\n\n"
             f"Original user request: {original_request}\n\n"
             f"Plan: {plan.description}\n\n"
-            f"## Worker Results\n\n"
+            f"Worker Results:\n\n"
             + "\n".join(results_summary)
-            + "\n\nReview the results above. Provide a concise summary of what was accomplished. "
-            "If there are any issues or incomplete tasks, flag them clearly."
+            + "\n\nSummarize what was done in 2-5 concise bullet points. "
+            "If there are issues, flag them. Do NOT repeat raw tool outputs or file contents. "
+            "Do NOT use headers (no # or ##). Keep it short and actionable."
         )
 
         system_prompt = get_orchestrator_prompt(self._cwd)
@@ -186,7 +188,6 @@ class Orchestrator:
         response = await self.client.collect_stream(
             messages=messages,
             model_role=ModelRole.PRO,
-            on_token=on_token,
         )
         return response.get("content") or ""
 

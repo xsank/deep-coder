@@ -77,14 +77,10 @@ def print_banner() -> None:
     _append_quickref(banner)
 
     # ── Status line ───────────────────────────────────────────────────────────
-    banner.append("  ", style="dim")
-    banner.append("[0x7F3A_B001]", style="bold magenta")
+    banner.append("  ")
+    banner.append("READY", style="bold green")
     banner.append("  ·  ", style="dim")
-    banner.append("STATUS: SYSTEM READY", style="bold green")
-    banner.append("  ·  ", style="dim")
-    banner.append("TYPE YOUR QUERY BELOW", style="bold cyan")
-    banner.append("  ·  ", style="dim")
-    banner.append("[ONLINE]", style="bold green")
+    banner.append("type your query or /help for commands", style="dim")
     banner.append("\n")
 
     console.print(
@@ -99,43 +95,23 @@ def print_banner() -> None:
 
 
 def _boot_sequence(__version__: str, platform, term_w: int) -> None:
-    """Simulate a cyberpunk-style boot sequence."""
+    """Clean boot sequence — aligned status lines, no box borders."""
     import random
 
+    sn = f"DS-{random.randint(9000, 9999)}-{random.randint(1000, 9999)}"
+
     BOOT_LINES = [
-        ("[bright_cyan]╔══ BIOS v2.04.13 ═══════════════════════════════════════════╗[/]", 0.02),
-        (f"[bright_cyan]║[/] [dim]MFR:[/] [bold green]DEEPSEEK INDUSTRIES[/]        [dim]SN:[/] [bold magenta]DS-{random.randint(9000,9999)}-{random.randint(1000,9999)}[/]  [bright_cyan]║[/]", 0.04),
-        (f"[bright_cyan]║[/] [dim]CPU:[/] [bold blue]DeepSeek V4 Pro[/] @ 2.8PHz        [dim]CORES:[/] [bold cyan]8[/]         [bright_cyan]║[/]", 0.03),
-        (f"[bright_cyan]║[/] [dim]MEM:[/] [bold green]128TB HBM4[/]  [dim]BUS:[/] 8192-bit    [dim]ECC:[/] [bold green]OK[/]        [bright_cyan]║[/]", 0.03),
-        (f"[bright_cyan]║[/] [dim]SYS:[/] {platform.system():10s} {platform.machine():>8s}        [dim]VER:[/] [bold cyan]{__version__:<10s}[/] [bright_cyan]║[/]", 0.03),
-        ("[bright_cyan]╚══ BIOS v2.04.13 ═══════════════════════════════════════════╝[/]", 0.02),
-        ("", 0.05),
-        ("[bold yellow]>>> INITIALIZING NEURAL SUBSYSTEMS...[/]", 0.06),
-        ("  [dim]├─[/] [green]✓[/] Orchestrator Core [Pro V4]  [dim]...[/] [bold green]ONLINE[/]", 0.04),
-        ("  [dim]├─[/] [green]✓[/] Worker Swarm [Flash V4]   [dim]...[/] [bold green]ONLINE[/]  [dim](max_workers=5)[/]", 0.04),
-        ("  [dim]├─[/] [green]✓[/] Tool Registry             [dim]...[/] [bold green]LOADED[/] [dim](read/write/shell/search/git)[/]", 0.03),
-        ("  [dim]├─[/] [green]✓[/] Skill Registry            [dim]...[/] [bold green]LOADED[/] [dim](review/commit/fix/think/explain/pr/test)[/]", 0.03),
-        ("  [dim]├─[/] [green]✓[/] Prompt Templates          [dim]...[/] [bold green]COMPILED[/]", 0.03),
-        ("  [dim]└─[/] [green]✓[/] Configuration             [dim]...[/] [bold green]PARSED[/]", 0.04),
+        ("", 0.02),
+        ("[bold yellow]  Initializing...[/]", 0.06),
+        ("", 0.02),
+        (f"  [green]✓[/] Orchestrator Core   [dim]Pro V4[/]         [bold green]online[/]", 0.04),
+        (f"  [green]✓[/] Worker Swarm        [dim]Flash V4 ×5[/]    [bold green]online[/]", 0.04),
+        (f"  [green]✓[/] Tool Registry       [dim]7 tools[/]        [bold green]loaded[/]", 0.03),
+        (f"  [green]✓[/] Skill Registry      [dim]7 skills[/]       [bold green]loaded[/]", 0.03),
+        (f"  [green]✓[/] API Connection      [dim]deepseek.com[/]   [bold green]connected[/]", 0.04),
         ("", 0.03),
-        ("[bold yellow]>>> SECURE HANDSHAKE WITH API ENDPOINT...[/]", 0.05),
-        ("  [dim]├─[/] [cyan]⟳[/] api.deepseek.com:443        [dim]...[/] [bold green]CONNECTED[/] [dim](TLS 1.3)[/]", 0.04),
-        ("  [dim]└─[/] [cyan]⟳[/] Auth Token                   [dim]...[/] [bold green]VERIFIED[/]", 0.04),
-        ("", 0.03),
-        ("[bold yellow]>>> LOADING SYSTEM MODULES...[/]", 0.04),
-        (f"  [dim]├─[/] [green]✓[/] [dim]deep_coder.agent.orchestrator[/]      [0x0000_0100]", 0.02),
-        (f"  [dim]├─[/] [green]✓[/] [dim]deep_coder.agent.worker[/]            [0x0000_0200]", 0.02),
-        (f"  [dim]├─[/] [green]✓[/] [dim]deep_coder.tools.file_ops[/]          [0x0000_0300]", 0.02),
-        (f"  [dim]├─[/] [green]✓[/] [dim]deep_coder.tools.shell[/]             [0x0000_0400]", 0.02),
-        (f"  [dim]├─[/] [green]✓[/] [dim]deep_coder.tools.search[/]            [0x0000_0500]", 0.02),
-        (f"  [dim]├─[/] [green]✓[/] [dim]deep_coder.tools.git[/]               [0x0000_0600]", 0.02),
-        (f"  [dim]├─[/] [green]✓[/] [dim]deep_coder.skills.base[/]             [0x0000_0700]", 0.02),
-        (f"  [dim]└─[/] [green]✓[/] [dim]deep_coder.display[/]                 [0x0000_0800]", 0.02),
+        (f"  [bold green]Ready.[/]  [dim]{platform.system()} {platform.machine()}  ·  {sn}[/]", 0.05),
         ("", 0.04),
-        ("[bold green]╔══ ALL SYSTEMS NOMINAL ═══════════════════════════════════╗[/]", 0.03),
-        (f"[bold green]║[/]  [bold]Deep Coder v{__version__}[/] booted successfully.                  [bold green]║[/]", 0.03),
-        ("[bold green]╚══════════════════════════════════════════════════════════╝[/]", 0.04),
-        ("", 0.05),
     ]
 
     for line, delay in BOOT_LINES:
@@ -145,79 +121,45 @@ def _boot_sequence(__version__: str, platform, term_w: int) -> None:
 
 
 def _append_arch_diagram(banner: Text) -> None:
-    """Append the architecture diagram to the banner."""
-    banner.append("  ╭─ ", style="bright_cyan")
-    banner.append("ARCHITECTURE", style="bold bright_yellow")
-    banner.append(" ─", style="bright_cyan")
-    banner.append("───────────────────────────────────────────────────────────────", style="dim")
-    banner.append("─╮\n", style="bright_cyan")
+    """Append a single-line architecture flow to the banner."""
+    banner.append("  ARCHITECTURE ", style="bold bright_yellow")
+    banner.append("─" * 50, style="dim")
+    banner.append("\n\n")
 
-    banner.append("  │  ", style="bright_cyan")
-    banner.append("┌──────────┐", style="bold blue")
-    banner.append("                      ┌──────────────────────────────┐", style="bold green")
-    banner.append("  │\n", style="bright_cyan")
-
-    banner.append("  │  ", style="bright_cyan")
-    banner.append("│  Pro V4  │", style="bold blue")
-    banner.append("  ──plan/delegate──▶  ", style="dim")
-    banner.append("│  Flash V4 Workers (parallel)  │", style="bold green")
-    banner.append("  │\n", style="bright_cyan")
-
-    banner.append("  │  ", style="bright_cyan")
-    banner.append("│Orchstrtr│", style="bold blue")
-    banner.append("  ◀──verify/merge──  ", style="dim")
-    banner.append("│  read · write · shell · search  │", style="bold green")
-    banner.append("  │\n", style="bright_cyan")
-
-    banner.append("  │  ", style="bright_cyan")
-    banner.append("└──────────┘", style="bold blue")
-    banner.append("                      └──────────────────────────────┘", style="bold green")
-    banner.append("  │\n", style="bright_cyan")
-
-    banner.append("  ╰", style="bright_cyan")
-    banner.append("───────────────────────────────────────────────────────────────────────────────", style="dim")
-    banner.append("─╯\n\n", style="bright_cyan")
+    banner.append("  ")
+    banner.append("Pro V4", style="bold blue")
+    banner.append(" ── plan ──▶ ", style="dim")
+    banner.append("Flash V4 Workers", style="bold green")
+    banner.append(" (parallel)", style="dim")
+    banner.append(" ── verify ──▶ ", style="dim")
+    banner.append("Pro V4", style="bold blue")
+    banner.append(" Summary", style="dim")
+    banner.append("\n\n")
 
 
 def _append_quickref(banner: Text) -> None:
-    """Append quick reference commands to the banner."""
-    banner.append("  ╭─ ", style="bright_cyan")
-    banner.append("QUICK REF", style="bold bright_yellow")
-    banner.append(" ─", style="bright_cyan")
-    banner.append("───────────────────────────────────────────────", style="dim")
-    banner.append("─╮\n", style="bright_cyan")
+    """Append quick reference commands in a clean grid."""
+    banner.append("  COMMANDS ", style="bold bright_yellow")
+    banner.append("─" * 54, style="dim")
+    banner.append("\n\n")
 
-    banner.append("  │  ", style="bright_cyan")
-    banner.append("/help", style="bold white")
-    banner.append(" → commands  ", style="dim")
-    banner.append("│  ", style="dim")
-    banner.append("/exit", style="bold white")
-    banner.append(" → quit    ", style="dim")
-    banner.append("│  ", style="dim")
-    banner.append("/cost", style="bold white")
-    banner.append(" → usage    ", style="dim")
-    banner.append("│  ", style="dim")
-    banner.append("/init", style="bold white")
-    banner.append(" → CODER.md", style="dim")
-    banner.append("  │\n", style="bright_cyan")
+    rows = [
+        [("/help", "commands"), ("/review", "AI review"), ("/commit", "commit msg"), ("/fix", "auto-fix")],
+        [("/think", "reasoning"), ("/explain", "explain"), ("/pr", "PR desc"), ("/test", "run tests")],
+    ]
 
-    banner.append("  │  ", style="bright_cyan")
-    banner.append("/review", style="bold white")
-    banner.append(" → AI CR  ", style="dim")
-    banner.append("│  ", style="dim")
-    banner.append("/commit", style="bold white")
-    banner.append(" → message ", style="dim")
-    banner.append("│  ", style="dim")
-    banner.append("/fix", style="bold white")
-    banner.append(" → analyze  ", style="dim")
-    banner.append("│  ", style="dim")
-    banner.append("/think", style="bold white")
-    banner.append(" → reason", style="dim")
-    banner.append("  │\n", style="bright_cyan")
-
-    banner.append("  ╰", style="bright_cyan")
-    banner.append("─────────────────────────────────────────────────────────────────────────────", style="dim")
-    banner.append("─╯\n\n", style="bright_cyan")
+    col_w = 19
+    for row in rows:
+        banner.append("  ")
+        for cmd, desc in row:
+            banner.append(cmd, style="bold white")
+            desc_text = f" {desc}"
+            banner.append(desc_text, style="dim")
+            pad = col_w - len(cmd) - len(desc_text)
+            if pad > 0:
+                banner.append(" " * pad)
+        banner.append("\n")
+    banner.append("\n")
 
 
 def print_error(message: str) -> None:
@@ -262,6 +204,114 @@ def print_task_status(task_id: str | None, status: str) -> None:
             console.print(f"  [error]Worker failed: {task_id} — {msg}[/error]")
 
 
+def print_phase(phase: str, detail: str = "") -> None:
+    """Print a compact phase indicator — like Claude Code's step markers."""
+    styles = {
+        "planning": ("blue", "Pro"),
+        "executing": ("yellow", "Flash"),
+        "verifying": ("green", "Pro"),
+    }
+    color, model = styles.get(phase, ("cyan", ""))
+    model_tag = f" [dim]({model})[/dim]" if model else ""
+    suffix = f"  [dim]{detail}[/dim]" if detail else ""
+    console.print(f"\n  [{color}]●[/{color}] [bold]{phase.upper()}[/bold]{model_tag}{suffix}")
+
+
+def print_plan_summary(plan_desc: str, tasks: list[dict[str, str]]) -> None:
+    """Print a compact plan overview — one line per task, no box."""
+    console.print(f"    [dim]{plan_desc}[/dim]")
+    for i, t in enumerate(tasks):
+        is_last = i == len(tasks) - 1
+        branch = "└─" if is_last else "├─"
+        deps = ""
+        if t.get("deps"):
+            deps = f" [dim](← {', '.join(t['deps'])})[/dim]"
+        console.print(f"    [dim]{branch}[/dim] [cyan]{t['id']}[/cyan] {t['desc']}{deps}")
+
+
+class TaskProgressDisplay:
+    """Compact inline progress for parallel task execution — no heavy panels."""
+
+    REFRESH_PER_SECOND = 4
+
+    def __init__(self) -> None:
+        self._task_states: dict[str, dict[str, str]] = {}
+        self._live: Live | None = None
+        self._lock = asyncio.Lock()
+
+    def _build_renderable(self) -> Text:
+        result = Text()
+        for tid, state in self._task_states.items():
+            status = state.get("status", "pending")
+            detail = state.get("detail", "")
+
+            if status == "running":
+                icon = "⟳"
+                icon_style = "bold yellow"
+                info = detail or "running"
+                info_style = "yellow"
+            elif status == "completed":
+                icon = "✓"
+                icon_style = "bold green"
+                info = "done"
+                info_style = "green"
+            elif status == "failed":
+                icon = "✗"
+                icon_style = "bold red"
+                info = detail or "failed"
+                info_style = "red"
+            else:
+                icon = "○"
+                icon_style = "dim"
+                info = "waiting"
+                info_style = "dim"
+
+            result.append("    ")
+            result.append(icon, style=icon_style)
+            result.append(f" {tid}", style="cyan")
+            result.append(f"  {info}", style=info_style)
+            result.append("\n")
+
+        return result
+
+    async def start(self, tasks: list[Any]) -> None:
+        for t in tasks:
+            self._task_states[t.id] = {
+                "status": "pending",
+                "desc": t.description[:40],
+                "detail": "",
+            }
+        self._live = Live(
+            self._build_renderable(),
+            console=console,
+            refresh_per_second=self.REFRESH_PER_SECOND,
+            transient=True,
+        )
+        self._live.start()
+
+    async def update(self, task_id: str, status: str, detail: str = "") -> None:
+        async with self._lock:
+            if task_id in self._task_states:
+                self._task_states[task_id]["status"] = status
+                if detail:
+                    self._task_states[task_id]["detail"] = detail
+            if self._live:
+                self._live.update(self._build_renderable())
+
+    async def stop(self) -> None:
+        if self._live:
+            self._live.update(self._build_renderable())
+            self._live.stop()
+            self._live = None
+        for tid, state in self._task_states.items():
+            status = state.get("status", "pending")
+            if status == "completed":
+                console.print(f"    [green]✓[/green] [cyan]{tid}[/cyan]  [green]done[/green]")
+            elif status == "failed":
+                detail = state.get("detail", "")
+                console.print(f"    [red]✗[/red] [cyan]{tid}[/cyan]  [red]{detail or 'failed'}[/red]")
+
+
 def print_response(content: str) -> None:
     console.print()
     console.print(Markdown(content))
@@ -303,6 +353,9 @@ def print_help_extended() -> None:
 **General:**
 - `/help`      — Show this help message
 - `/exit`      — Exit Deep Coder
+
+**Shell:**
+- `! <command>` — Run a shell command inline (e.g. `! ls -la`, `! git status`)
 
 **Tips:**
 - Multi-line input: press Escape then Enter
