@@ -150,17 +150,33 @@ class ToolRegistry:
             return ToolResult.error(f"Tool not found: {name}")
         try:
             kwargs = json.loads(arguments) if arguments else {}
+            old_content: str | None = None
+            resolved_path: str | None = None
             if not tool.is_read_only:
                 file_path = kwargs.get("file_path") or kwargs.get("path")
                 if file_path:
                     self.snapshots.capture(file_path)
-            return await tool.execute(**kwargs)
+                    resolved_path = str(Path(file_path).expanduser().resolve())
+                    old_content = self._modified_files_get(resolved_path)
+            result = await tool.execute(**kwargs)
+            if resolved_path and result.success and not tool.is_read_only:
+                p = Path(resolved_path)
+                new_content = p.read_text(encoding="utf-8", errors="replace") if p.exists() else None
+                if result.metadata is None:
+                    result.metadata = {}
+                result.metadata["file_path"] = resolved_path
+                result.metadata["old_content"] = old_content
+                result.metadata["new_content"] = new_content
+            return result
         except json.JSONDecodeError as e:
             return ToolResult.error(f"Invalid JSON arguments: {e}")
         except TypeError as e:
             return ToolResult.error(f"Invalid arguments for tool '{name}': {e}")
         except Exception as e:
             return ToolResult.error(f"Tool execution failed: {e}")
+
+    def _modified_files_get(self, resolved_path: str) -> str | None:
+        return self.snapshots._modified_files.get(resolved_path)
 
 
 def create_default_registry() -> ToolRegistry:

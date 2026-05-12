@@ -68,7 +68,6 @@ class SlashCompleter(Completer):
         ("/init", "Generate CODER.md"),
         ("/save", "Save session"),
         ("/resume", "Resume session"),
-        ("/vim", "Toggle vi mode"),
     ]
 
     def __init__(self, skills: SkillRegistry | None = None) -> None:
@@ -107,7 +106,6 @@ class CommandHandler:
         self.config = config
         self.status_panel = status_panel
         self.skills = skills
-        self.vi_mode = False
 
     async def handle(self, command: str) -> bool:
         """Dispatch a slash command. Returns True if the REPL should exit."""
@@ -130,7 +128,6 @@ class CommandHandler:
             "/init": self._cmd_init,
             "/save": self._cmd_save,
             "/resume": self._cmd_resume,
-            "/vim": self._cmd_vim,
         }.get(cmd)
 
         if handler:
@@ -184,7 +181,6 @@ class CommandHandler:
         console.print(f"  API key:     {'***' + c.model.api_key[-4:] if c.has_api_key else '(not set)'}")
         console.print(f"  Max workers: {c.agent.max_workers}")
         console.print(f"  Temperature: {c.model.temperature}")
-        console.print(f"  Vi mode:     {self.vi_mode}")
         return False
 
     async def _cmd_model(self, _: str) -> bool:
@@ -332,12 +328,6 @@ class CommandHandler:
         print_success(f"Resumed session '{name}' ({n} messages)")
         return False
 
-    async def _cmd_vim(self, _: str) -> bool:
-        self.vi_mode = not self.vi_mode
-        mode = "ON" if self.vi_mode else "OFF"
-        print_info(f"Vi mode: {mode}")
-        return False
-
 
 async def _ask_approval(tool_name: str, arguments: str) -> bool:
     """Ask user for approval before executing a write/shell tool."""
@@ -451,7 +441,6 @@ async def _run_repl(config: Config) -> None:
         try:
             user_input = await session.prompt_async(
                 "you> ",
-                vi_mode=cmd_handler.vi_mode,
             )
             last_interrupt = 0.0
         except KeyboardInterrupt:

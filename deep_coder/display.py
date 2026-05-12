@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import difflib
+import os
 import shutil
 import sys
 import time
@@ -182,6 +184,112 @@ def print_tool_call(tool_name: str, status: str = "calling") -> None:
     icon = {"calling": "->", "completed": "OK", "failed": "XX"}.get(status, "->")
     style = {"calling": "tool", "completed": "success", "failed": "error"}.get(status, "tool")
     console.print(f"  [{style}][{icon}][/{style}] {tool_name}", highlight=False)
+
+
+_EXT_TO_LEXER: dict[str, str] = {
+    ".py": "python", ".js": "javascript", ".ts": "typescript", ".tsx": "tsx",
+    ".jsx": "jsx", ".go": "go", ".rs": "rust", ".rb": "ruby", ".java": "java",
+    ".c": "c", ".cpp": "cpp", ".h": "cpp", ".cs": "csharp", ".swift": "swift",
+    ".kt": "kotlin", ".sh": "bash", ".zsh": "bash", ".fish": "fish",
+    ".json": "json", ".yaml": "yaml", ".yml": "yaml", ".toml": "toml",
+    ".xml": "xml", ".html": "html", ".css": "css", ".scss": "scss",
+    ".sql": "sql", ".md": "markdown", ".txt": "text", ".cfg": "ini",
+    ".ini": "ini", ".dockerfile": "dockerfile", ".lua": "lua",
+}
+
+
+def print_file_diff(
+    file_path: str,
+    old_content: str | None,
+    new_content: str | None,
+    context_lines: int = 3,
+) -> None:
+    """Render a Claude-style inline diff with syntax-aware coloring."""
+    short_path = file_path
+    try:
+        short_path = os.path.relpath(file_path)
+    except ValueError:
+        pass
+
+    if old_content is None and new_content is not None:
+        action = "Write"
+    elif old_content is not None and new_content is None:
+        action = "Delete"
+    elif old_content == new_content:
+        return
+    else:
+        action = "Update"
+
+    old_lines = (old_content or "").splitlines(keepends=True)
+    new_lines = (new_content or "").splitlines(keepends=True)
+
+    added = sum(1 for _ in difflib.unified_diff(old_lines, new_lines) if _.startswith("+") and not _.startswith("+++"))
+    removed = sum(1 for _ in difflib.unified_diff(old_lines, new_lines) if _.startswith("-") and not _.startswith("---"))
+
+    summary_parts: list[str] = []
+    if added:
+        summary_parts.append(f"Added {added} line{'s' if added != 1 else ''}")
+    if removed:
+        summary_parts.append(f"Removed {removed} line{'s' if removed != 1 else ''}")
+    summary = ", ".join(summary_parts) if summary_parts else "No changes"
+
+    console.print(f"\n  [bold bright_cyan]⏺ {action}[/bold bright_cyan]([cyan]{short_path}[/cyan])")
+    console.print(f"  [dim]⎿  {summary}[/dim]")
+
+    import re
+
+    ext = os.path.splitext(file_path)[1].lower()
+    lexer = _EXT_TO_LEXER.get(ext, "text")
+    highlighter = Syntax("", lexer, theme="monokai", background_color="default")
+
+    def _hl(code: str) -> Text:
+        t = highlighter.highlight(code)
+        t.rstrip()
+        return t
+
+    diff = list(difflib.unified_diff(old_lines, new_lines, n=context_lines))
+    if len(diff) <= 2:
+        return
+
+    old_ln = 0
+    new_ln = 0
+    first_hunk = True
+
+    for line in diff[2:]:
+        line_text = line.rstrip("\n")
+
+        if line.startswith("@@"):
+            m = re.match(r"@@ -(\d+)", line)
+            if m:
+                old_ln = int(m.group(1))
+                new_ln = old_ln
+                match_new = re.search(r"\+(\d+)", line)
+                if match_new:
+                    new_ln = int(match_new.group(1))
+            if not first_hunk:
+                console.print("      [dim]...[/dim]")
+            first_hunk = False
+        elif line.startswith("-"):
+            code = line_text[1:]
+            rendered = Text(f"      {old_ln:>5d} - ", style="red")
+            rendered.append_text(_hl(code))
+            console.print(rendered)
+            old_ln += 1
+        elif line.startswith("+"):
+            code = line_text[1:]
+            rendered = Text(f"      {new_ln:>5d} + ", style="green")
+            rendered.append_text(_hl(code))
+            console.print(rendered)
+            new_ln += 1
+        else:
+            code = line_text[1:] if line_text.startswith(" ") else line_text
+            rendered = Text(f"      {new_ln:>5d}   ", style="dim")
+            rendered.append_text(_hl(code))
+            console.print(rendered)
+            old_ln += 1
+            new_ln += 1
+
+    console.print()
 
 
 def print_task_status(task_id: str | None, status: str) -> None:
@@ -465,7 +573,6 @@ def print_help_extended() -> None:
 **Settings:**
 - `/config`    — Show current configuration
 - `/model`     — Show model information
-- `/vim`       — Toggle vi input mode
 
 **General:**
 - `/help`      — Show this help message

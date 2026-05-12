@@ -7,6 +7,7 @@ from typing import Any, Callable, Coroutine, Optional
 
 from deep_coder.agent.task import Task
 from deep_coder.client import DeepSeekClient
+from deep_coder.display import print_file_diff
 from deep_coder.models import ModelRole
 from deep_coder.prompts.system import get_worker_prompt
 from deep_coder.tools.base import ToolRegistry
@@ -72,6 +73,12 @@ class Worker:
                         await on_status(task, f"tool:{tool_name}")
 
                     result = await self.tool_registry.dispatch(tool_name, fn["arguments"])
+                    if result.success and result.metadata and "old_content" in result.metadata:
+                        print_file_diff(
+                            result.metadata["file_path"],
+                            result.metadata["old_content"],
+                            result.metadata["new_content"],
+                        )
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc["id"],
