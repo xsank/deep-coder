@@ -27,6 +27,7 @@ def create_default_skills() -> SkillRegistry:
     from deep_coder.skills.commit import CommitSkill
     from deep_coder.skills.explain import ExplainSkill
     from deep_coder.skills.fix import FixSkill
+    from deep_coder.skills.memory import MemorySkill, RememberSkill
     from deep_coder.skills.pr import PRSkill
     from deep_coder.skills.review import ReviewSkill
     from deep_coder.skills.test_skill import TestSkill
@@ -40,4 +41,6 @@ def create_default_skills() -> SkillRegistry:
     registry.register(ThinkSkill())
     registry.register(PRSkill())
     registry.register(ExplainSkill())
+    registry.register(RememberSkill())
+    registry.register(MemorySkill())
     return registry

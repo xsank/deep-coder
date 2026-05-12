@@ -8,6 +8,7 @@ from pathlib import Path
 PROMPTS_DIR = Path(__file__).parent
 
 MAX_CODER_MD_CHARS = 2000
+MAX_MEMORY_CHARS = 3000
 
 
 def load_prompt(name: str) -> str:
@@ -35,6 +36,12 @@ def _find_coder_md(cwd: str | None) -> str | None:
     return None
 
 
+def _load_memories(cwd: str | None) -> str | None:
+    from deep_coder.memory import MemoryStore
+    store = MemoryStore(cwd=cwd)
+    return store.get_prompt_section(max_chars=MAX_MEMORY_CHARS)
+
+
 def get_orchestrator_prompt(cwd: str | None = None) -> str:
     base = load_prompt("orchestrator")
     context_parts = [base]
@@ -43,6 +50,9 @@ def get_orchestrator_prompt(cwd: str | None = None) -> str:
     coder_md = _find_coder_md(cwd)
     if coder_md:
         context_parts.append(f"\n## Project Context (CODER.md)\n{coder_md}")
+    memory_section = _load_memories(cwd)
+    if memory_section:
+        context_parts.append(f"\n## User Memories\n{memory_section}")
     return "\n".join(context_parts)
 
 
@@ -61,4 +71,7 @@ def get_worker_prompt(
     coder_md = _find_coder_md(cwd)
     if coder_md:
         parts.append(f"\n## Project Context (CODER.md)\n{coder_md}")
+    memory_section = _load_memories(cwd)
+    if memory_section:
+        parts.append(f"\n## User Memories\n{memory_section}")
     return "\n".join(parts)

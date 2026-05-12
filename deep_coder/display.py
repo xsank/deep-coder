@@ -110,7 +110,7 @@ def _boot_sequence(__version__: str, platform, term_w: int) -> None:
         (f"  [green]✓[/] Orchestrator Core   [dim]Pro V4[/]         [bold green]online[/]", 0.04),
         (f"  [green]✓[/] Worker Swarm        [dim]Flash V4 ×5[/]    [bold green]online[/]", 0.04),
         (f"  [green]✓[/] Tool Registry       [dim]7 tools[/]        [bold green]loaded[/]", 0.03),
-        (f"  [green]✓[/] Skill Registry      [dim]7 skills[/]       [bold green]loaded[/]", 0.03),
+        (f"  [green]✓[/] Skill Registry      [dim]9 skills[/]       [bold green]loaded[/]", 0.03),
         (f"  [green]✓[/] API Connection      [dim]deepseek.com[/]   [bold green]connected[/]", 0.04),
         ("", 0.03),
         (f"  [bold green]Ready.[/]  [dim]{platform.system()} {platform.machine()}  ·  {sn}[/]", 0.05),
@@ -149,6 +149,7 @@ def _append_quickref(banner: Text) -> None:
     rows = [
         [("/help", "commands"), ("/review", "AI review"), ("/commit", "commit msg"), ("/fix", "auto-fix")],
         [("/think", "reasoning"), ("/explain", "explain"), ("/pr", "PR desc"), ("/test", "run tests")],
+        [("/remember", "save note"), ("/memory", "manage")],
     ]
 
     col_w = 19
@@ -771,6 +772,8 @@ def print_help_extended() -> None:
 - `/think <question>` — Deep reasoning for architecture/design questions
 - `/pr [base]`        — Generate PR title and description from branch diff
 - `/explain [file:lines]` — Explain code, file, or project overview
+- `/remember <text>` — Save a memory (preference, feedback, reference, note)
+- `/memory [list|search|delete|show]` — Manage saved memories
 
 **Session:**
 - `/clear`     — Clear conversation history and file snapshots
