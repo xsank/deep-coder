@@ -7,10 +7,25 @@ The most cost-effective code assistant tool based on DeepSeek V4.
 Deep Coder uses a **two-tier agent architecture** for optimal cost-performance balance:
 
 ```
-User Input
-    │
-    ▼
-┌─ Orchestrator (V4 Pro) ─── Planning ──▶ Flash Workers (parallel) ──▶ Pro Verification ──▶ Summary
+                User Input
+                    │
+                    ▼
+        ┌───────────────────────┐
+        │  Orchestrator (V4 Pro)│  Planning & task decomposition
+        └───────────┬───────────┘
+                    │
+          ┌─────────┼─────────┐
+          ▼         ▼         ▼
+       ┌──────┐ ┌──────┐ ┌──────┐
+       │Worker│ │Worker│ │Worker│  Parallel execution (V4 Flash)
+       │Task 1│ │Task 2│ │Task 3│
+       └──┬───┘ └──┬───┘ └──┬───┘
+          │        │        │
+          └────────┼────────┘
+                   ▼
+        ┌───────────────────────┐
+        │  Orchestrator (V4 Pro)│  Result verification & summary
+        └───────────────────────┘
 ```
 
 - **DeepSeek V4 Pro** — Global planning, task decomposition, and result verification
