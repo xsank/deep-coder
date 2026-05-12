@@ -357,10 +357,39 @@ async def _ask_approval(tool_name: str, arguments: str) -> bool:
     return answer in ("y", "yes", "a", "always")
 
 
+_INTERACTIVE_CMDS = frozenset({
+    "vim", "vi", "nvim", "nano", "emacs", "emacsclient",
+    "less", "more", "man",
+    "htop", "top", "btop",
+    "ssh", "tmux", "screen",
+})
+
+
+def _is_interactive_command(command: str) -> bool:
+    for token in command.split():
+        if "=" in token:
+            continue
+        return os.path.basename(token) in _INTERACTIVE_CMDS
+    return False
+
+
 async def _run_shell_command(command: str) -> None:
     """Execute a shell command and display output inline."""
     console.print(f"  [dim]$[/dim] {command}")
     loop = asyncio.get_event_loop()
+
+    if _is_interactive_command(command):
+        try:
+            returncode = await loop.run_in_executor(
+                None,
+                lambda: subprocess.run(command, shell=True).returncode,
+            )
+            if returncode != 0:
+                console.print(f"  [dim]exit code {returncode}[/dim]")
+        except Exception as e:
+            print_error(f"Shell error: {e}")
+        return
+
     try:
         result = await loop.run_in_executor(
             None,
