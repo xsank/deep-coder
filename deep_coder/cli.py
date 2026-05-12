@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from prompt_toolkit import PromptSession
+from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
@@ -49,6 +50,45 @@ def _create_key_bindings() -> KeyBindings:
         event.current_buffer.insert_text("\n")
 
     return kb
+
+
+class SlashCompleter(Completer):
+    """Autocomplete for slash commands — shows suggestions when typing /."""
+
+    BUILTIN_COMMANDS: list[tuple[str, str]] = [
+        ("/help", "Show help"),
+        ("/exit", "Exit"),
+        ("/clear", "Clear history"),
+        ("/config", "Show config"),
+        ("/model", "Show models"),
+        ("/cost", "Usage stats"),
+        ("/compact", "Compress history"),
+        ("/diff", "Show file changes"),
+        ("/undo", "Revert last change"),
+        ("/init", "Generate CODER.md"),
+        ("/save", "Save session"),
+        ("/resume", "Resume session"),
+        ("/vim", "Toggle vi mode"),
+    ]
+
+    def __init__(self, skills: SkillRegistry | None = None) -> None:
+        self._entries: list[tuple[str, str]] = list(self.BUILTIN_COMMANDS)
+        if skills:
+            for skill in skills.list_skills():
+                self._entries.append((skill.name, skill.description))
+
+    def get_completions(self, document, complete_event):  # type: ignore[override]
+        text = document.text_before_cursor.lstrip()
+        if not text.startswith("/") or " " in text:
+            return
+        for cmd, desc in self._entries:
+            if cmd.startswith(text):
+                yield Completion(
+                    cmd,
+                    start_position=-len(text),
+                    display=cmd,
+                    display_meta=desc,
+                )
 
 
 class CommandHandler:
@@ -355,10 +395,13 @@ async def _run_repl(config: Config) -> None:
     status_panel = StatusPanel(client.usage)
     skills = create_default_skills()
     cmd_handler = CommandHandler(orchestrator, client, config, status_panel, skills)
+    completer = SlashCompleter(skills)
 
     session: PromptSession = PromptSession(
         history=FileHistory(str(HISTORY_FILE)),
         key_bindings=_create_key_bindings(),
+        completer=completer,
+        complete_while_typing=True,
         multiline=False,
     )
 
