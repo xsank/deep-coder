@@ -1,0 +1,106 @@
+{
+  "name": "deep-coder",
+  "displayName": "Deep Coder",
+  "description": "AI coding assistant powered by DeepSeek V4 — two-tier agent with Pro planning and Flash execution",
+  "version": "0.1.0",
+  "publisher": "xsank",
+  "license": "AGPL-3.0",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "deepseek",
+    "ai",
+    "code-assistant",
+    "agent"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xsank/deep-coder"
+  },
+  "main": "./dist/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "deep-coder",
+          "title": "Deep Coder",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "deep-coder": [
+        {
+          "type": "webview",
+          "id": "deep-coder.chat",
+          "name": "Chat"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "deep-coder.startServer",
+        "title": "Deep Coder: Start Server"
+      },
+      {
+        "command": "deep-coder.stopServer",
+        "title": "Deep Coder: Stop Server"
+      },
+      {
+        "command": "deep-coder.review",
+        "title": "Deep Coder: Review Code"
+      },
+      {
+        "command": "deep-coder.explain",
+        "title": "Deep Coder: Explain Selection"
+      }
+    ],
+    "configuration": {
+      "title": "Deep Coder",
+      "properties": {
+        "deep-coder.serverPort": {
+          "type": "number",
+          "default": 9120,
+          "description": "Port for the Deep Coder WebSocket server"
+        },
+        "deep-coder.autoStartServer": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start the server when the extension activates"
+        },
+        "deep-coder.pythonPath": {
+          "type": "string",
+          "default": "deep-coder",
+          "description": "Path to the deep-coder CLI executable"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "webpack --mode production",
+    "watch": "webpack --mode development --watch",
+    "lint": "eslint src/",
+    "package": "vsce package",
+    "publish": "vsce publish"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@types/ws": "^8.5.0",
+    "ts-loader": "^9.5.0",
+    "typescript": "^5.3.0",
+    "webpack": "^5.90.0",
+    "webpack-cli": "^5.1.0",
+    "@vscode/vsce": "^2.22.0"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}

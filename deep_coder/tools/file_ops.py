@@ -1,8 +1,8 @@
-"""File operation tools: read, write, edit, list files."""
+"""File operation tools: read, write, edit, list, delete, move, multi-edit, insert."""
 
 from __future__ import annotations
 
-import os
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -217,3 +217,230 @@ class ListFilesTool(Tool):
             return ToolResult.ok(result, total=len(files))
         except Exception as e:
             return ToolResult.error(f"Failed to list files: {e}")
+
+
+class DeleteFileTool(Tool):
+    @property
+    def name(self) -> str:
+        return "delete_file"
+
+    @property
+    def description(self) -> str:
+        return "Delete a file or empty directory."
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Path to the file or empty directory to delete.",
+                },
+            },
+            "required": ["file_path"],
+        }
+
+    async def execute(self, file_path: str, **_: Any) -> ToolResult:
+        path = Path(file_path).expanduser().resolve()
+        if not path.exists():
+            return ToolResult.error(f"Path not found: {path}")
+        try:
+            if path.is_file() or path.is_symlink():
+                path.unlink()
+                return ToolResult.ok(f"Deleted file: {path}")
+            elif path.is_dir():
+                path.rmdir()
+                return ToolResult.ok(f"Deleted empty directory: {path}")
+            else:
+                return ToolResult.error(f"Cannot delete: {path}")
+        except OSError as e:
+            return ToolResult.error(f"Failed to delete: {e}")
+
+
+class MoveFileTool(Tool):
+    @property
+    def name(self) -> str:
+        return "move_file"
+
+    @property
+    def description(self) -> str:
+        return "Move or rename a file or directory."
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "source": {
+                    "type": "string",
+                    "description": "Path to the source file or directory.",
+                },
+                "destination": {
+                    "type": "string",
+                    "description": "Destination path (new name or directory).",
+                },
+            },
+            "required": ["source", "destination"],
+        }
+
+    async def execute(
+        self, source: str, destination: str, **_: Any,
+    ) -> ToolResult:
+        src = Path(source).expanduser().resolve()
+        dst = Path(destination).expanduser().resolve()
+        if not src.exists():
+            return ToolResult.error(f"Source not found: {src}")
+        try:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(dst))
+            return ToolResult.ok(f"Moved {src} → {dst}")
+        except Exception as e:
+            return ToolResult.error(f"Failed to move: {e}")
+
+
+class MultiEditFileTool(Tool):
+    @property
+    def name(self) -> str:
+        return "multi_edit_file"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Apply multiple find-and-replace edits to a single file in one call. "
+            "Each edit replaces an exact string match. All edits are atomic — "
+            "if any old_string is not found, no changes are applied."
+        )
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Path to the file to edit.",
+                },
+                "edits": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "old_string": {
+                                "type": "string",
+                                "description": "Exact string to find.",
+                            },
+                            "new_string": {
+                                "type": "string",
+                                "description": "Replacement string.",
+                            },
+                        },
+                        "required": ["old_string", "new_string"],
+                    },
+                    "description": "List of edits to apply sequentially.",
+                },
+            },
+            "required": ["file_path", "edits"],
+        }
+
+    async def execute(
+        self,
+        file_path: str,
+        edits: list[dict[str, str]],
+        **_: Any,
+    ) -> ToolResult:
+        path = Path(file_path).expanduser().resolve()
+        if not path.exists():
+            return ToolResult.error(f"File not found: {path}")
+        try:
+            content = path.read_text(encoding="utf-8")
+        except Exception as e:
+            return ToolResult.error(f"Failed to read file: {e}")
+
+        missing: list[int] = []
+        for i, edit in enumerate(edits):
+            old = edit.get("old_string", "")
+            if old not in content:
+                missing.append(i + 1)
+
+        if missing:
+            return ToolResult.error(
+                f"old_string not found for edit(s) #{', #'.join(str(n) for n in missing)}. "
+                "No changes applied."
+            )
+
+        applied = 0
+        for edit in edits:
+            old = edit["old_string"]
+            new = edit["new_string"]
+            count = content.count(old)
+            if count > 1:
+                return ToolResult.error(
+                    f"old_string found {count} times (edit #{applied + 1}). "
+                    "Provide more context to make it unique. No changes applied."
+                )
+            content = content.replace(old, new, 1)
+            applied += 1
+
+        try:
+            path.write_text(content, encoding="utf-8")
+            return ToolResult.ok(f"Applied {applied} edit(s) to {path}")
+        except Exception as e:
+            return ToolResult.error(f"Failed to write file: {e}")
+
+
+class InsertTextTool(Tool):
+    @property
+    def name(self) -> str:
+        return "insert_text"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Insert text at a specific line number in a file. "
+            "Line numbers are 1-based. The new content is inserted before the specified line."
+        )
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Path to the file.",
+                },
+                "line": {
+                    "type": "integer",
+                    "description": "Line number to insert before (1-based). "
+                    "Use a value beyond the last line to append.",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Text content to insert.",
+                },
+            },
+            "required": ["file_path", "line", "content"],
+        }
+
+    async def execute(
+        self, file_path: str, line: int, content: str, **_: Any,
+    ) -> ToolResult:
+        path = Path(file_path).expanduser().resolve()
+        if not path.exists():
+            return ToolResult.error(f"File not found: {path}")
+        try:
+            existing = path.read_text(encoding="utf-8")
+            lines = existing.splitlines(keepends=True)
+            insert_idx = max(0, min(line - 1, len(lines)))
+            new_lines = content.splitlines(keepends=True)
+            if new_lines and not new_lines[-1].endswith("\n"):
+                new_lines[-1] += "\n"
+            lines[insert_idx:insert_idx] = new_lines
+            path.write_text("".join(lines), encoding="utf-8")
+            n = len(new_lines)
+            return ToolResult.ok(
+                f"Inserted {n} line{'s' if n != 1 else ''} at line {line} in {path}"
+            )
+        except Exception as e:
+            return ToolResult.error(f"Failed to insert text: {e}")

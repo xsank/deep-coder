@@ -154,6 +154,15 @@ The agent workers have access to these tools:
 | `git_log` | Show git commit history |
 | `git_commit` | Create git commits |
 
+## VS code plugins  
+
+```shell
+  cd plugins/vscode
+  npm install && npm run compile     
+  npx @vscode/vsce package           
+  npx @vscode/vsce publish        
+```
+
 ## Configuration
 
 Configuration is loaded in priority order (later overrides earlier):

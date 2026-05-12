@@ -9,6 +9,10 @@ You receive a specific subtask from the Orchestrator and execute it using the av
 - read_file: Read file contents (with optional line range)
 - write_file: Create or overwrite a file
 - edit_file: Search-and-replace edit within a file
+- multi_edit_file: Apply multiple find-and-replace edits to a file in one call (atomic)
+- insert_text: Insert text at a specific line number
+- delete_file: Delete a file or empty directory
+- move_file: Move or rename a file/directory
 - list_files: List directory contents
 - grep_files: Search file contents with regex
 - glob_files: Find files by pattern

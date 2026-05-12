@@ -219,3 +219,6 @@ __marimo__/
 
 # Deep Coder local config (contains API keys)
 .deep-coder/
+
+# Claude
+CLAUDE.md

@@ -181,8 +181,12 @@ class ToolRegistry:
 
 def create_default_registry() -> ToolRegistry:
     from deep_coder.tools.file_ops import (
+        DeleteFileTool,
         EditFileTool,
+        InsertTextTool,
         ListFilesTool,
+        MoveFileTool,
+        MultiEditFileTool,
         ReadFileTool,
         WriteFileTool,
     )
@@ -194,6 +198,10 @@ def create_default_registry() -> ToolRegistry:
     registry.register(ReadFileTool())
     registry.register(WriteFileTool())
     registry.register(EditFileTool())
+    registry.register(MultiEditFileTool())
+    registry.register(InsertTextTool())
+    registry.register(DeleteFileTool())
+    registry.register(MoveFileTool())
     registry.register(ListFilesTool())
     registry.register(GrepFilesTool())
     registry.register(GlobFilesTool())

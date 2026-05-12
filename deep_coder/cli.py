@@ -340,7 +340,7 @@ async def _ask_approval(tool_name: str, arguments: str) -> bool:
             console.print(f"    File: {args['file_path']}")
     except (json.JSONDecodeError, KeyError):
         pass
-    console.print("  [dim]Allow? \[y]es / \[n]o / \[a]lways[/dim] ", end="")
+    console.print(r"  [dim]Allow? \[y]es / \[n]o / \[a]lways[/dim] ", end="")
 
     loop = asyncio.get_event_loop()
     answer = await loop.run_in_executor(None, lambda: input().strip().lower())
@@ -515,6 +515,9 @@ def main() -> None:
         console.print("Options:")
         console.print("  -h, --help     Show this help message")
         console.print("  --version      Show version")
+        console.print("  --serve        Start WebSocket server for IDE integration")
+        console.print("  --port PORT    Server port (default: 9120)")
+        console.print("  --host HOST    Server host (default: 127.0.0.1)")
         console.print()
         console.print("Environment variables:")
         console.print("  DEEPSEEK_API_KEY       Your DeepSeek API key")
@@ -529,6 +532,22 @@ def main() -> None:
         return
 
     config = Config.load()
+
+    if "--serve" in sys.argv:
+        port = 9120
+        host = "127.0.0.1"
+        if "--port" in sys.argv:
+            idx = sys.argv.index("--port")
+            if idx + 1 < len(sys.argv):
+                port = int(sys.argv[idx + 1])
+        if "--host" in sys.argv:
+            idx = sys.argv.index("--host")
+            if idx + 1 < len(sys.argv):
+                host = sys.argv[idx + 1]
+        from deep_coder.server import run_server
+        run_server(config, host=host, port=port)
+        return
+
     try:
         asyncio.run(_run_repl(config))
     except KeyboardInterrupt:
