@@ -357,6 +357,42 @@ async def _ask_approval(tool_name: str, arguments: str) -> bool:
     return answer in ("y", "yes")
 
 
+async def _ask_plan_approval(
+    plan_desc: str,
+    tasks_info: list[dict[str, Any]],
+) -> str:
+    """Ask user to approve, reject, or edit the generated plan."""
+    console.print()
+    console.print(
+        r"  [dim]Approve this plan? \[y]es / \[n]o / \[e]dit[/dim] ",
+        end="",
+    )
+    loop = asyncio.get_event_loop()
+    answer = await loop.run_in_executor(
+        None, lambda: input().strip().lower(),
+    )
+    if answer in ("y", "yes", ""):
+        return "yes"
+    if answer in ("n", "no"):
+        console.print("  [warning]Plan rejected.[/warning]")
+        return "no"
+    if answer in ("e", "edit"):
+        console.print(
+            "  [dim]Describe your changes (then press Enter):[/dim]",
+        )
+        console.print("  [dim]> [/dim]", end="")
+        edit_text = await loop.run_in_executor(
+            None, lambda: input().strip(),
+        )
+        if not edit_text:
+            console.print(
+                "  [dim]No changes specified, proceeding.[/dim]",
+            )
+            return "yes"
+        return edit_text
+    return "yes"
+
+
 _INTERACTIVE_CMDS = frozenset({
     "vim", "vi", "nvim", "nano", "emacs", "emacsclient",
     "less", "more", "man",
@@ -424,6 +460,7 @@ async def _run_repl(config: Config) -> None:
     orchestrator = Orchestrator(client, config, tool_registry)
     orchestrator.set_cwd(os.getcwd())
     orchestrator.set_approve_handler(_ask_approval)
+    orchestrator.set_plan_approval_handler(_ask_plan_approval)
 
     status_panel = StatusPanel(client.usage)
     skills = create_default_skills()

@@ -32,6 +32,7 @@ class DeepCoderServer:
         self._orchestrator.set_cwd(os.getcwd())
         self._current_task: asyncio.Task[Any] | None = None
         self._approval_futures: dict[str, asyncio.Future[bool]] = {}
+        self._plan_approval_futures: dict[str, asyncio.Future[str]] = {}
 
     async def _health_handler(self, request: web.Request) -> web.Response:
         usage = self._client.usage
@@ -64,6 +65,10 @@ class DeepCoderServer:
                 self._cancel_current()
             elif msg_type == "approval_response":
                 self._resolve_approval(msg.get("id", ""), msg.get("approved", False))
+            elif msg_type == "plan_approval_response":
+                self._resolve_plan_approval(
+                    msg.get("id", ""), msg.get("decision", "yes"),
+                )
             else:
                 await self._send(ws, {"type": "error", "message": f"Unknown type: {msg_type}"})
 
@@ -97,7 +102,28 @@ class DeepCoderServer:
             finally:
                 self._approval_futures.pop(req_id, None)
 
+        async def on_plan_approval(
+            plan_desc: str, tasks_info: list[dict[str, Any]],
+        ) -> str:
+            req_id = uuid.uuid4().hex[:8]
+            loop = asyncio.get_event_loop()
+            future: asyncio.Future[str] = loop.create_future()
+            self._plan_approval_futures[req_id] = future
+            await self._send(ws, {
+                "type": "plan_approval",
+                "id": req_id,
+                "description": plan_desc,
+                "tasks": tasks_info,
+            })
+            try:
+                return await asyncio.wait_for(future, timeout=300)
+            except asyncio.TimeoutError:
+                return "yes"
+            finally:
+                self._plan_approval_futures.pop(req_id, None)
+
         self._orchestrator.set_approve_handler(on_approve)
+        self._orchestrator.set_plan_approval_handler(on_plan_approval)
 
         original_process = self._orchestrator.process
 
@@ -156,6 +182,11 @@ class DeepCoderServer:
         future = self._approval_futures.get(req_id)
         if future and not future.done():
             future.set_result(approved)
+
+    def _resolve_plan_approval(self, req_id: str, decision: str) -> None:
+        future = self._plan_approval_futures.get(req_id)
+        if future and not future.done():
+            future.set_result(decision)
 
     async def _send(self, ws: web.WebSocketResponse, data: dict[str, Any]) -> None:
         if not ws.closed:

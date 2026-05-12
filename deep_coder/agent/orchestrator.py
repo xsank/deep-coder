@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from typing import Any, Optional
+from typing import Any, Callable, Coroutine, Optional
 
 from deep_coder.agent.task import Plan, Task, TaskStatus
 from deep_coder.agent.worker import OnApprove, Worker
@@ -21,6 +21,10 @@ from deep_coder.display import (
 from deep_coder.models import ModelRole
 from deep_coder.prompts.system import get_orchestrator_prompt
 from deep_coder.tools.base import ToolRegistry
+
+OnPlanApproval = Optional[
+    Callable[[str, list[dict[str, Any]]], Coroutine[Any, Any, str]]
+]
 
 
 def _make_assistant_msg(response: dict[str, Any]) -> dict[str, Any]:
@@ -47,6 +51,8 @@ class Orchestrator:
         self.conversation: list[dict[str, Any]] = []
         self._cwd: Optional[str] = None
         self._on_approve: OnApprove = None
+        self._on_plan_approval: OnPlanApproval = None
+        self._plan_revision_depth = 0
 
     def set_cwd(self, cwd: str) -> None:
         self._cwd = cwd
@@ -55,26 +61,21 @@ class Orchestrator:
     def set_approve_handler(self, handler: OnApprove) -> None:
         self._on_approve = handler
 
-    async def _needs_planning(self, message: str) -> bool:
-        """Fast classifier: does this message need Pro planning or can Flash handle it directly?"""
-        if len(message) > 200:
-            return True
-        response = await self.client.chat_complete(
-            messages=[
-                {"role": "system", "content": "You classify user messages. Answer YES or NO only."},
-                {"role": "user", "content": (
-                    "Is this message a simple greeting, casual chat, or general knowledge "
-                    "question that has NOTHING to do with code, projects, files, tools, "
-                    "programming, or software?\n\n"
-                    f"Message: {message}\n\nAnswer YES or NO:"
-                )},
-            ],
-            model_role=ModelRole.FLASH,
-            max_tokens=10,
-            temperature=0.0,
-        )
-        answer = (response.get("content") or "").strip().upper()
-        return "YES" not in answer
+    def set_plan_approval_handler(self, handler: OnPlanApproval) -> None:
+        self._on_plan_approval = handler
+
+    _GREETING_PREFIXES = (
+        "hi", "hello", "hey", "thanks", "thank you", "ok", "okay",
+        "good morning", "good afternoon", "good evening", "good night",
+        "你好", "谢谢", "早上好", "晚上好", "再见", "bye",
+    )
+
+    def _is_simple_greeting(self, message: str) -> bool:
+        """Check if the message is a trivial greeting that doesn't need Pro."""
+        text = message.strip().lower()
+        if len(text) > 30:
+            return False
+        return any(text.startswith(g) for g in self._GREETING_PREFIXES)
 
     def _estimate_tokens(self) -> int:
         """Rough token estimate: ~4 chars per token."""
@@ -93,14 +94,14 @@ class Orchestrator:
             console.print(f"  [dim]Auto-compacting conversation ({n} messages)...[/dim]")
             await self.compact()
 
-        if not await self._needs_planning(user_message):
+        if self._is_simple_greeting(user_message):
             response = await self.client.collect_stream(
                 messages=[
                     {"role": "system", "content": (
                         "You are Deep Coder, a helpful coding assistant. "
-                        "Answer concisely."
+                        "Be brief and friendly."
                     )},
-                    *self.conversation,
+                    {"role": "user", "content": user_message},
                 ],
                 model_role=ModelRole.FLASH,
                 on_token=on_token,
@@ -135,6 +136,42 @@ class Orchestrator:
                 for t in plan.tasks
             ]
             print_plan_summary(plan.description, plan_tasks_info)
+
+            if self._on_plan_approval:
+                approval = await self._on_plan_approval(
+                    plan.description, plan_tasks_info,
+                )
+                if approval == "no":
+                    self.conversation.append({
+                        "role": "assistant",
+                        "content": "(Plan rejected by user)",
+                    })
+                    return ""
+                if approval != "yes":
+                    self.conversation.append(
+                        _make_assistant_msg(response),
+                    )
+                    if self._plan_revision_depth >= 3:
+                        console.print(
+                            "  [warning]Max revisions reached."
+                            "[/warning]"
+                        )
+                        return ""
+                    self._plan_revision_depth += 1
+                    edit_msg = (
+                        "The user wants to modify the plan. "
+                        "Their feedback:\n"
+                        f"{approval}\n\n"
+                        "Please revise the plan accordingly."
+                    )
+                    try:
+                        return await self.process(
+                            edit_msg,
+                            on_token=on_token,
+                            on_status=on_status,
+                        )
+                    finally:
+                        self._plan_revision_depth -= 1
 
             n = len(plan.tasks)
             try:
@@ -211,6 +248,15 @@ class Orchestrator:
                 finally:
                     progress.resume()
 
+        async def on_tool_action(
+            task_id: str, tool_name: str, args_summary: str,
+            status: str, result_brief: str,
+        ) -> None:
+            progress.add_tool_action(
+                task_id, tool_name, args_summary,
+                status, result_brief,
+            )
+
         try:
             while not plan.is_complete:
                 ready = plan.get_ready_tasks()
@@ -232,6 +278,7 @@ class Orchestrator:
                     self._run_worker(
                         task, on_worker_status=on_worker_status,
                         on_approve=on_approve_with_pause,
+                        on_tool_action=on_tool_action,
                     )
                     for task in batch
                 ]
@@ -247,6 +294,7 @@ class Orchestrator:
                     self._run_worker(
                         task, on_worker_status=on_worker_status,
                         on_approve=on_approve_with_pause,
+                        on_tool_action=on_tool_action,
                     )
                     for task in failed_tasks
                 ]
@@ -270,6 +318,7 @@ class Orchestrator:
         on_status: Any = None,
         on_worker_status: Any = None,
         on_approve: OnApprove = None,
+        on_tool_action: Any = None,
     ) -> None:
         try:
             await self.worker.execute(
@@ -277,6 +326,7 @@ class Orchestrator:
                 on_status=on_status,
                 on_worker_status=on_worker_status,
                 on_approve=on_approve or self._on_approve,
+                on_tool_action=on_tool_action,
                 conversation_summary=self._build_conversation_summary(),
             )
         except Exception as e:

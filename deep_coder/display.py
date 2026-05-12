@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import difflib
+import json
 import os
 import shutil
 import sys
@@ -508,6 +509,64 @@ def print_plan_summary(plan_desc: str, tasks: list[dict[str, str]]) -> None:
         console.print(f"    [dim]{branch}[/dim] [cyan]{t['id']}[/cyan] {t['desc']}{deps}")
 
 
+def summarize_tool_args(tool_name: str, arguments_json: str) -> str:
+    """Extract the key argument from a tool call for display."""
+    try:
+        args = json.loads(arguments_json) if arguments_json else {}
+    except (json.JSONDecodeError, TypeError):
+        return ""
+    if tool_name in (
+        "read_file", "write_file", "edit_file",
+        "multi_edit_file", "insert_text", "delete_file",
+    ):
+        return os.path.basename(args.get("file_path", ""))
+    if tool_name == "move_file":
+        src = os.path.basename(args.get("source", ""))
+        dst = os.path.basename(args.get("destination", ""))
+        return f"{src} → {dst}" if src else ""
+    if tool_name == "exec_shell":
+        cmd = args.get("command", "")
+        return cmd[:50] + ("..." if len(cmd) > 50 else "")
+    if tool_name == "grep_files":
+        pat = args.get("pattern", "")
+        glb = args.get("glob", "")
+        s = f'"{pat}"'
+        if glb:
+            s += f" in {glb}"
+        return s[:50]
+    if tool_name == "glob_files":
+        return args.get("pattern", "")[:50]
+    if tool_name == "list_files":
+        return args.get("path", ".")
+    if tool_name == "git_commit":
+        return args.get("message", "")[:40]
+    if tool_name == "git_checkout":
+        return args.get("branch", "")
+    return ""
+
+
+def summarize_tool_result(
+    tool_name: str, content: str, success: bool,
+) -> str:
+    """Create a brief summary of a tool result for display."""
+    if not success:
+        return "failed"
+    if tool_name == "read_file":
+        n = content.count("\n")
+        return f"{n} lines" if n > 0 else "ok"
+    if tool_name == "grep_files":
+        n = content.count("\n")
+        return f"{n} matches" if n > 0 else "0 matches"
+    if tool_name in ("glob_files", "list_files"):
+        n = content.count("\n")
+        return f"{n} files" if n > 0 else "empty"
+    if tool_name == "exec_shell":
+        if "exit code:" in content.lower():
+            return "error"
+        return "ok"
+    return "ok"
+
+
 class TaskProgressDisplay:
     """Compact inline progress for parallel task execution with animated header."""
 
@@ -515,6 +574,7 @@ class TaskProgressDisplay:
 
     def __init__(self, detail: str = "") -> None:
         self._task_states: dict[str, dict[str, str]] = {}
+        self._task_tool_history: dict[str, list[dict[str, str]]] = {}
         self._live: Live | None = None
         self._lock = asyncio.Lock()
         self._detail = detail
@@ -540,6 +600,7 @@ class TaskProgressDisplay:
         for tid, state in self._task_states.items():
             status = state.get("status", "pending")
             detail = state.get("detail", "")
+            history = self._task_tool_history.get(tid, [])
 
             if status in ("running", "retrying"):
                 icon = "⟳"
@@ -549,7 +610,11 @@ class TaskProgressDisplay:
             elif status == "completed":
                 icon = "✓"
                 icon_style = "bold green"
-                info = "done"
+                n_tools = len(history)
+                if n_tools > 0:
+                    info = f"done ({n_tools} tools)"
+                else:
+                    info = "done"
                 info_style = "green"
             elif status == "failed":
                 icon = "✗"
@@ -568,7 +633,57 @@ class TaskProgressDisplay:
             result.append(f"  {info}", style=info_style)
             result.append("\n")
 
+            if status in ("running", "retrying") and history:
+                recent = history[-3:]
+                for i, entry in enumerate(recent):
+                    is_last = i == len(recent) - 1
+                    branch = "└─" if is_last else "├─"
+                    if entry["status"] == "running":
+                        t_icon = "⟳"
+                        t_style = "yellow"
+                    elif entry["status"] == "done":
+                        t_icon = "✓"
+                        t_style = "green"
+                    else:
+                        t_icon = "✗"
+                        t_style = "red"
+                    line = entry["tool"]
+                    if entry["args"]:
+                        line += f": {entry['args']}"
+                    if entry["result"]:
+                        line += f" ({entry['result']})"
+                    result.append(f"      {branch} ")
+                    result.append(t_icon, style=t_style)
+                    result.append(f" {line}", style="dim")
+                    result.append("\n")
+
         return result
+
+    def add_tool_action(
+        self,
+        task_id: str,
+        tool_name: str,
+        args_summary: str,
+        status: str,
+        result_brief: str = "",
+    ) -> None:
+        """Record a tool action for display. status: start|done|failed."""
+        history = self._task_tool_history.setdefault(task_id, [])
+        if status == "start":
+            history.append({
+                "tool": tool_name,
+                "args": args_summary,
+                "status": "running",
+                "result": "",
+            })
+        else:
+            for entry in reversed(history):
+                if entry["tool"] == tool_name and entry["status"] == "running":
+                    entry["status"] = status
+                    entry["result"] = result_brief
+                    break
+        if self._live:
+            self._live.update(self._build_renderable())
 
     async def start(self, tasks: list[Any]) -> None:
         self._start_time = time.monotonic()
@@ -578,6 +693,7 @@ class TaskProgressDisplay:
                 "desc": t.description[:40],
                 "detail": "",
             }
+            self._task_tool_history[t.id] = []
         self._live = Live(
             self._build_renderable(),
             console=console,
@@ -619,11 +735,20 @@ class TaskProgressDisplay:
         )
         for tid, state in self._task_states.items():
             status = state.get("status", "pending")
+            history = self._task_tool_history.get(tid, [])
             if status == "completed":
-                console.print(f"    [green]✓[/green] [cyan]{tid}[/cyan]  [green]done[/green]")
+                n = len(history)
+                ts = f" ({n} tools)" if n > 0 else ""
+                console.print(
+                    f"    [green]✓[/green] [cyan]{tid}[/cyan]"
+                    f"  [green]done{ts}[/green]",
+                )
             elif status == "failed":
                 detail = state.get("detail", "")
-                console.print(f"    [red]✗[/red] [cyan]{tid}[/cyan]  [red]{detail or 'failed'}[/red]")
+                console.print(
+                    f"    [red]✗[/red] [cyan]{tid}[/cyan]"
+                    f"  [red]{detail or 'failed'}[/red]",
+                )
 
 
 def print_response(content: str) -> None:
