@@ -1,15 +1,16 @@
 #!/bin/bash
-# One-click release: bump version → commit → tag → push → CI publishes.
+# One-click release: bump version → commit → tag → push → PyPI + GitHub Release.
 #
 # Usage:
 #   ./scripts/release.sh 0.1.0
 #
 # What happens:
-#   1. Updates version in pyproject.toml and deep_coder/__init__.py
-#   2. Commits: "Release v0.1.0"
+#   1. Updates version in pyproject.toml and deep_coder/__init__.py (if changed)
+#   2. Commits: "Release v0.1.0" (skipped if version unchanged)
 #   3. Tags: v0.1.0
 #   4. Pushes commit + tag to origin
-#   5. Tag push triggers release.yml → GitHub Release + PyPI publish
+#   5. Builds wheel and uploads to PyPI
+#   6. Tag push triggers release.yml → GitHub Release + binaries
 
 set -euo pipefail
 
@@ -49,8 +50,11 @@ NEW_INIT=$(grep '__version__' deep_coder/__init__.py)
 echo "  pyproject.toml: $NEW_TOML"
 echo "  __init__.py:    $NEW_INIT"
 
-git add pyproject.toml deep_coder/__init__.py
-git commit -m "Release v$VERSION"
+if [[ -n "$(git diff pyproject.toml deep_coder/__init__.py)" ]]; then
+    git add pyproject.toml deep_coder/__init__.py
+    git commit -m "Release v$VERSION"
+fi
+
 git tag "v$VERSION"
 
 echo ""
