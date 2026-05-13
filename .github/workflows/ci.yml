@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: write
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -26,13 +29,14 @@ jobs:
         run: ruff check deep_coder/ tests/
 
       - name: Test with coverage
-        run: pytest --cov --cov-report=xml -q
+        run: pytest --cov --cov-report=xml --cov-report=term -q
 
-      - name: Upload coverage
-        if: matrix.python-version == '3.12'
-        uses: codecov/codecov-action@v4
-        with:
-          files: coverage.xml
-          fail_ci_if_error: false
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      - name: Generate and commit coverage badge
+        if: github.ref == 'refs/heads/main' && matrix.python-version == '3.12'
+        run: |
+          python scripts/generate_badge.py
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add assets/coverage-badge.svg
+          git diff --cached --quiet || git commit -m "Update coverage badge [skip ci]"
+          git push

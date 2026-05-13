@@ -2,9 +2,9 @@
 
 [![CI](https://github.com/xsank/deep-coder/actions/workflows/ci.yml/badge.svg)](https://github.com/xsank/deep-coder/actions/workflows/ci.yml)
 [![PyPI version](https://img.shields.io/pypi/v/deep-coder)](https://pypi.org/project/deep-coder/)
-[![Python](https://img.shields.io/pypi/pyversions/deep-coder)](https://pypi.org/project/deep-coder/)
+[![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)](https://pypi.org/project/deep-coder/)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
-[![codecov](https://codecov.io/gh/xsank/deep-coder/graph/badge.svg)](https://codecov.io/gh/xsank/deep-coder)
+![Coverage](assets/coverage-badge.svg)
 
 The most cost-effective code assistant tool based on DeepSeek V4.
 
