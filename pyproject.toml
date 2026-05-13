@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+requires = ["setuptools>=68.0,<77.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -47,7 +47,7 @@ dev = [
 build = [
     "pyinstaller==6.20.0",
     "build>=1.0.0",
-    "twine>=5.0.0",
+    "twine>=5.0.0,<6.0.0",
 ]
 
 [project.scripts]

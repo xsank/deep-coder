@@ -1,6 +1,6 @@
-.PHONY: clean lint test coverage coverage-badge wheel pyinstaller publish all
+.PHONY: clean lint test coverage coverage-badge wheel pyinstaller publish release all
 
-VERSION := $(shell python -c "from deep_coder import __version__; print(__version__)")
+CURRENT_VERSION := $(shell python -c "from deep_coder import __version__; print(__version__)")
 
 clean:
 	rm -rf build/ dist/ *.egg-info coverage.xml htmlcov/
@@ -25,5 +25,9 @@ pyinstaller: clean
 
 publish: wheel
 	twine upload dist/*
+
+release:
+	@if [ -z "$(V)" ]; then echo "Usage: make release V=0.2.0"; exit 1; fi
+	./scripts/release.sh $(V)
 
 all: lint test wheel pyinstaller
