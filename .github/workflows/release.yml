@@ -1,0 +1,108 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build-wheel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: pip install build
+
+      - name: Build wheel and sdist
+        run: python -m build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-wheel
+          path: dist/
+
+  build-binary:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            platform: macos
+          - os: windows-latest
+            platform: windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -e ".[build]"
+
+      - name: Build binary
+        run: pyinstaller deep_coder.spec
+
+      - name: Get version
+        id: version
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Package binary (macOS)
+        if: matrix.platform == 'macos'
+        run: |
+          cd dist
+          tar czf deep-coder-${{ steps.version.outputs.version }}-macos-$(uname -m).tar.gz deep-coder
+          rm deep-coder
+
+      - name: Package binary (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          cd dist
+          Compress-Archive -Path deep-coder.exe -DestinationPath "deep-coder-${{ steps.version.outputs.version }}-windows-amd64.zip"
+          Remove-Item deep-coder.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.platform }}
+          path: dist/
+
+  publish:
+    needs: [build-wheel, build-binary]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: all-artifacts
+
+      - name: Collect release files
+        run: |
+          mkdir -p release
+          cp all-artifacts/dist-wheel/* release/ || true
+          cp all-artifacts/dist-macos/* release/ || true
+          cp all-artifacts/dist-windows/* release/ || true
+          ls -la release/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+
+      - name: Publish to PyPI
+        if: ${{ !contains(github.ref, '-') }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: all-artifacts/dist-wheel/
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          skip-existing: true
