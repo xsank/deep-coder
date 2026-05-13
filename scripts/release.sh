@@ -73,5 +73,5 @@ twine upload dist/*
 
 echo ""
 echo "Done! v$VERSION published."
-echo "  PyPI: https://pypi.org/project/deep-coder/$VERSION/"
+echo "  PyPI: https://pypi.org/project/deep-coder-cli/$VERSION/"
 echo "  GitHub Actions: https://github.com/xsank/deep-coder/actions"

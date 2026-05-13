@@ -1,8 +1,8 @@
 # Deep Coder
 
 [![CI](https://github.com/xsank/deep-coder/actions/workflows/ci.yml/badge.svg)](https://github.com/xsank/deep-coder/actions/workflows/ci.yml)
-[![PyPI version](https://img.shields.io/pypi/v/deep-coder)](https://pypi.org/project/deep-coder/)
-[![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)](https://pypi.org/project/deep-coder/)
+[![PyPI version](https://img.shields.io/pypi/v/deep-coder-cli)](https://pypi.org/project/deep-coder-cli/)
+[![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)](https://pypi.org/project/deep-coder-cli/)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 ![Coverage](assets/coverage-badge.svg)
 
