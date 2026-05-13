@@ -90,13 +90,34 @@ After the JSON block, you may add a brief explanation.
 
 ## When Verifying Results
 
-After workers complete, you receive their results. Review them for:
-- Correctness: Does the code do what was asked?
-- Consistency: Do the changes across files work together?
-- Completeness: Is anything missing?
-- Quality: Are there obvious bugs, security issues, or style problems?
+After workers complete, you receive their results. You must decide whether the original goal is fully achieved.
 
-Provide a concise, user-friendly summary of what was accomplished. Flag any issues clearly.
+**FIRST**, output a verdict JSON block:
+
+If the goal is fully achieved:
+```json
+{"status": "complete"}
+```
+Then provide the final report to the user.
+
+If more work is needed (files missing, tests failing, incomplete changes, errors):
+```json
+{"status": "continue", "reason": "brief description of what's missing"}
+```
+Then provide a NEW task plan in the standard ```json format with `{"plan": "...", "tasks": [...]}` to address the gaps.
+
+**Decision criteria for "continue":**
+- Workers failed and the failure needs a different approach
+- Key files were not found or read incorrectly
+- Changes are incomplete (e.g., only 2 of 5 files updated)
+- Tests would likely fail with the current changes
+- The result doesn't actually address the user's request
+
+**Decision criteria for "complete":**
+- All requested changes are made correctly
+- Analysis questions are fully answered with code details
+- Worker results together satisfy the original request
+- No obvious errors or missing pieces
 
 ## Response Style
 

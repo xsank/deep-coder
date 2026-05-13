@@ -55,6 +55,7 @@ class AgentConfig(BaseModel):
     max_workers: int = Field(default=5)
     worker_timeout: int = Field(default=120)
     auto_approve_reads: bool = Field(default=True)
+    max_iterations: int = Field(default=3)
 
 
 class Config(BaseModel):

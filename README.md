@@ -4,38 +4,74 @@ The most cost-effective code assistant tool based on DeepSeek V4.
 
 ## Architecture
 
-Deep Coder uses a **two-tier agent architecture** for optimal cost-performance balance:
+Deep Coder uses a **two-tier agent architecture** with **DAG-based task scheduling** and a **verification loop** for optimal cost-performance balance:
 
 ```
-                User Input
-                    │
-                    ▼
-        ┌───────────────────────┐
-        │  Orchestrator (V4 Pro)│  Planning & task decomposition
-        └───────────┬───────────┘
-                    │
-          ┌─────────┼─────────┐
-          ▼         ▼         ▼
-       ┌──────┐ ┌──────┐ ┌──────┐
-       │Worker│ │Worker│ │Worker│  Parallel execution (V4 Flash)
-       │Task 1│ │Task 2│ │Task 3│
-       └──┬───┘ └──┬───┘ └──┬───┘
-          │        │        │
-          └────────┼────────┘
-                   ▼
-        ┌───────────────────────┐
-        │  Orchestrator (V4 Pro)│  Result verification & summary
-        └───────────────────────┘
+                  User Input
+                      │
+                      ▼
+          ┌───────────────────────┐
+          │ Orchestrator (V4 Pro) │  Plan generation (JSON Task DAG)
+          │  "Think"              │  ↓ Each task declares dependencies
+          └───────────┬───────────┘
+                      │ Plan (Task DAG)
+                      ▼
+          ┌───────────────────────┐
+          │   Execution Engine    │  Pick ready tasks (all deps met)
+          │   (asyncio gather)    │  Launch up to max_workers in parallel
+          └──┬───────┬───────┬────┘
+             │       │       │
+     ┌───────┴┐ ┌────┴───┐ ┌─┴──────┐
+     │Worker  │ │Worker  │ │Worker  │  Parallel execution (V4 Flash)
+     │Task A  │ │Task B  │ │Task C  │  Each has tool access & retry
+     └───────┬┘ └────┬───┘ └────────┘
+             │       │
+        ┌────┴───────┴────┐
+        │   Task D        │  Depends on A + B → starts after both done
+        └────────┬────────┘
+                 │
+                 ▼
+     ┌─────────────────────────┐
+     │ Orchestrator (V4 Pro)   │  VERIFICATION
+     │  "Verify"               │  JSON verdict: "complete" or "continue"
+     └───────────┬─────────────┘
+                 │
+       ┌─────────┴─────────┐
+       ▼                   ▼
+   "complete"          "continue"
+       │                   │
+       ▼                   ▼
+   Final report    Generate new plan
+   to user         (replan & re-execute)
+                   loop continues
 ```
 
-- **DeepSeek V4 Pro** — Global planning, task decomposition, and result verification
-- **DeepSeek V4 Flash** — Parallel subtask execution with tool access, fast and cost-efficient
+### Task DAG with Maximal Parallelism
 
-Each request flows through three phases with animated progress indicators:
+The **Orchestrator** (Pro model) decomposes the user's request into a JSON plan where each task declares:
 
-1. **PLANNING** (Pro) — Analyze request, decompose into parallel subtasks
-2. **EXECUTING** (Flash) — Workers execute subtasks concurrently with live progress
-3. **VERIFYING** (Pro) — Review all results, synthesize final answer
+- `id` — Unique identifier
+- `description` — Instructions for the Worker
+- `depends_on` — List of task IDs that must complete first
+
+The **Execution Engine** uses topological ordering: it continuously picks **ready tasks** (all dependencies satisfied) and launches them concurrently via `asyncio.gather`, up to `max_workers` (default: 5). Tasks with no dependencies run immediately in parallel; dependent tasks start as soon as their prerequisites finish. This maximizes parallelism while respecting ordering constraints.
+
+### Verification Loop
+
+After all tasks in the current plan complete, the **Orchestrator** re-engages to:
+
+1. **Analyze** all task results and the original request
+2. **Issue a JSON verdict** — either `"complete"` (goal achieved) or `"continue"` (needs changes)
+3. **On "continue"** — Generate a new plan (with new Task DAG) addressing what's missing
+4. **Loop** — The new plan feeds back into the Execution Engine, and the cycle repeats
+
+This creates a **closed verification loop**: `Plan → Execute → Verify → Replan → Execute → ... → Complete`. The loop terminates only when the Orchestrator judges the goal fully satisfied, ensuring correctness without manual intervention.
+
+### Cost-Performance Strategy
+
+- **DeepSeek V4 Pro** — Used only for planning (brainstorming decomposition) and verification (quality gate). These are the "thinking" steps.
+- **DeepSeek V4 Flash** — Used for all actual tool execution (reading files, editing code, running shell commands). These are the "doing" steps, run in parallel.
+- **Automatic retry** — Failed tasks are retried once before reporting failure to the Orchestrator.
 
 ## Installation
 

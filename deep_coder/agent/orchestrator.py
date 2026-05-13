@@ -12,6 +12,7 @@ from deep_coder.agent.worker import OnApprove, Worker
 from deep_coder.client import DeepSeekClient, strip_dsml
 from deep_coder.config import Config
 from deep_coder.display import (
+    PhaseSpinner,
     ReasoningStreamDisplay,
     TaskProgressDisplay,
     console,
@@ -175,26 +176,14 @@ class Orchestrator:
                     finally:
                         self._plan_revision_depth -= 1
 
-            n = len(plan.tasks)
             try:
-                await self._execute_plan_with_progress(plan, n)
+                result = await self._run_plan_loop(
+                    plan, user_message, on_token,
+                )
             except (KeyboardInterrupt, asyncio.CancelledError):
                 raise KeyboardInterrupt("Interrupted during execution")
 
-            from deep_coder.display import StreamPrinter
-            verify_printer = StreamPrinter(
-                phase="verifying", phase_detail="reviewing results",
-            )
-            try:
-                verification = await self._verify_results(
-                    plan, user_message, on_token=verify_printer.on_token,
-                )
-            except (KeyboardInterrupt, asyncio.CancelledError):
-                verify_printer.finish()
-                raise KeyboardInterrupt("Interrupted during verification")
-            verify_printer.finish()
-
-            self.conversation.append({"role": "assistant", "content": verification})
+            self.conversation.append({"role": "assistant", "content": result})
             return ""
 
         if on_token and content:
@@ -340,6 +329,68 @@ class Orchestrator:
             if on_worker_status:
                 await on_worker_status(task.id, "failed", str(e)[:60])
 
+    # ── Plan-Execute-Verify loop ─────────────────────────────────────────
+
+    async def _run_plan_loop(
+        self,
+        plan: Plan,
+        user_message: str,
+        on_token: Any = None,
+    ) -> str:
+        """Execute plan → verify → re-plan loop until Pro deems it complete."""
+        max_iter = self.config.agent.max_iterations
+        all_round_summaries: list[str] = []
+
+        for iteration in range(max_iter):
+            if iteration > 0:
+                plan_info = [
+                    {
+                        "id": t.id,
+                        "desc": t.description[:128],
+                        "deps": t.depends_on,
+                    }
+                    for t in plan.tasks
+                ]
+                print_plan_summary(plan.description, plan_info)
+
+            n = len(plan.tasks)
+            await self._execute_plan_with_progress(plan, n)
+
+            summary = self._build_round_summary(plan, iteration + 1)
+            all_round_summaries.append(summary)
+
+            status, reason, body = await self._verify_and_decide(
+                plan, user_message, all_round_summaries,
+            )
+
+            if status == "complete":
+                return body
+
+            console.print(
+                f"  [yellow]↻[/yellow] [dim]iteration "
+                f"{iteration + 1}: {reason}[/dim]"
+            )
+            new_plan = self._try_extract_plan(body)
+            if not new_plan or not new_plan.tasks:
+                return body
+            plan = new_plan
+
+        console.print(
+            "  [yellow]●[/yellow] [dim]max iterations reached[/dim]"
+        )
+        return await self._force_final_report(
+            user_message, all_round_summaries, on_token,
+        )
+
+    def _build_round_summary(self, plan: Plan, iteration: int) -> str:
+        parts = [f"## Iteration {iteration} — {plan.description}"]
+        for task in plan.tasks:
+            st = "✓" if task.status == TaskStatus.COMPLETED else "✗"
+            text = (task.result or task.error or "")[:500]
+            desc = task.description[:100]
+            parts.append(f"- [{st}] {task.id}: {desc}\n  {text}")
+        return "\n".join(parts)
+
     _ANALYSIS_KEYWORDS = (
         "分析", "解释", "explain", "analyze", "analysis", "how does",
         "how do", "what is", "what are", "读", "read", "show", "展示",
@@ -349,68 +400,188 @@ class Orchestrator:
     )
 
     def _is_analysis_request(self, request: str) -> bool:
-        text = request.lower()
-        return any(kw in text for kw in self._ANALYSIS_KEYWORDS)
+        return any(kw in request.lower() for kw in self._ANALYSIS_KEYWORDS)
 
-    async def _verify_results(
+    def _get_verdict_instruction(self, original_request: str) -> str:
+        analysis_hint = ""
+        if self._is_analysis_request(original_request):
+            analysis_hint = (
+                "\nFor analysis/explanation requests, the report should "
+                "preserve key code snippets in fenced code blocks, "
+                "explain architecture and design patterns, and be thorough.\n"
+            )
+        return (
+            "Decide whether the original user request is fully achieved.\n\n"
+            "FIRST, output a verdict JSON block:\n"
+            "```json\n"
+            '{"status": "complete"}\n'
+            "```\n"
+            "or:\n"
+            "```json\n"
+            '{"status": "continue", "reason": "brief reason"}\n'
+            "```\n\n"
+            "Then:\n"
+            "- If complete: provide the final report to the user."
+            f"{analysis_hint}\n"
+            "- If continue: provide a NEW task plan in ```json format "
+            "with {\"plan\": \"...\", \"tasks\": [...]} to address the gaps.\n"
+        )
+
+    async def _verify_and_decide(
         self,
         plan: Plan,
         original_request: str,
-        on_token: Any = None,
-    ) -> str:
-        results_summary = []
+        all_round_summaries: list[str],
+    ) -> tuple[str, str, str]:
+        """Verify worker results, streaming report in real-time if complete.
+
+        Returns (status, reason, body).
+        """
+        from deep_coder.display import StreamPrinter
+
+        current_results = []
         for task in plan.tasks:
-            status = "COMPLETED" if task.status == TaskStatus.COMPLETED else "FAILED"
+            st = "COMPLETED" if task.status == TaskStatus.COMPLETED else "FAILED"
             result_text = task.result or task.error or "No output"
-            results_summary.append(
-                f"### Task: {task.id} [{status}]\n"
+            current_results.append(
+                f"### {task.id} [{st}]\n"
                 f"Description: {task.description}\n"
                 f"Result: {result_text}\n"
             )
 
-        results_block = "\n".join(results_summary)
+        history_block = ""
+        if len(all_round_summaries) > 1:
+            prev = "\n\n---\n\n".join(all_round_summaries[:-1])
+            history_block = f"Previous iterations:\n\n{prev}\n\n---\n\n"
 
-        if self._is_analysis_request(original_request):
-            instruction = (
-                "The user asked for code analysis/explanation. "
-                "Synthesize a comprehensive response that:\n"
-                "- Preserves key code snippets from worker results "
-                "in fenced code blocks (```python etc.)\n"
-                "- Explains architecture, data flow, and design patterns\n"
-                "- Highlights important implementation details\n"
-                "- Points out any issues or potential improvements\n"
-                "- Uses markdown formatting (headers, lists, code blocks) "
-                "for readability\n"
-                "Be thorough — the user wants to understand the code, "
-                "not just a summary."
-            )
-        else:
-            instruction = (
-                "Summarize what was done in 2-5 concise bullet points. "
-                "If there are issues, flag them. "
-                "Do NOT use headers (no # or ##). "
-                "Keep it short and actionable."
-            )
-
-        verification_prompt = (
+        prompt = (
             f"Original user request: {original_request}\n\n"
             f"Plan: {plan.description}\n\n"
-            f"Worker Results:\n\n"
-            f"{results_block}\n\n"
-            f"{instruction}"
+            f"{history_block}"
+            "Current iteration worker results:\n\n"
+            + "\n".join(current_results)
+            + "\n\n"
+            + self._get_verdict_instruction(original_request)
         )
 
-        system_prompt = get_orchestrator_prompt(self._cwd)
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": verification_prompt},
-        ]
+        buffer: list[str] = []
+        verdict_found = False
+        report_printer: StreamPrinter | None = None
+        spinner = PhaseSpinner("verifying", "reviewing results")
+        spinner_stopped = False
 
+        async def stop_spinner() -> None:
+            nonlocal spinner_stopped
+            if not spinner_stopped:
+                spinner_stopped = True
+                await spinner.__aexit__(None, None, None)
+
+        async def on_token(token: str) -> None:
+            nonlocal verdict_found, report_printer
+            buffer.append(token)
+
+            if report_printer is not None:
+                await report_printer.on_token(token)
+                return
+
+            if verdict_found:
+                return
+
+            text = "".join(buffer)
+            if len(text) < 25:
+                return
+
+            match = re.search(
+                r"```json\s*(\{.*?\})\s*```", text, re.DOTALL,
+            )
+            if not match:
+                return
+
+            try:
+                v = json.loads(match.group(1))
+            except json.JSONDecodeError:
+                return
+
+            if "status" not in v or not set(v.keys()) <= {"status", "reason"}:
+                return
+
+            verdict_found = True
+            if v["status"] == "complete":
+                await stop_spinner()
+                report_printer = StreamPrinter(
+                    phase="reporting",
+                    phase_detail="generating report",
+                )
+                rest = text[match.end():].lstrip("\n")
+                if rest:
+                    await report_printer.on_token(rest)
+
+        await spinner.__aenter__()
+        try:
+            await self.client.collect_stream(
+                messages=[
+                    {"role": "system", "content": get_orchestrator_prompt(self._cwd)},
+                    {"role": "user", "content": prompt},
+                ],
+                model_role=ModelRole.PRO,
+                on_token=on_token,
+            )
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            await stop_spinner()
+            if report_printer:
+                report_printer.finish()
+            raise
+
+        await stop_spinner()
+        if report_printer:
+            report_printer.finish()
+
+        full_content = strip_dsml("".join(buffer))
+        return self._parse_verdict(full_content)
+
+    def _parse_verdict(self, content: str) -> tuple[str, str, str]:
+        """Parse verdict JSON + body → (status, reason, body)."""
+        match = re.search(
+            r"```json\s*(\{.*?\})\s*```", content, re.DOTALL,
+        )
+        if match:
+            try:
+                verdict = json.loads(match.group(1))
+                if "status" in verdict and set(verdict.keys()) <= {"status", "reason"}:
+                    status = verdict.get("status", "complete")
+                    reason = verdict.get("reason", "")
+                    body = content[match.end():].strip()
+                    return status, reason, body
+            except json.JSONDecodeError:
+                pass
+        return "complete", "", content
+
+    async def _force_final_report(
+        self,
+        original_request: str,
+        all_round_summaries: list[str],
+        on_token: Any = None,
+    ) -> str:
+        from deep_coder.display import StreamPrinter
+        history = "\n\n---\n\n".join(all_round_summaries)
+        prompt = (
+            f"Original request: {original_request}\n\n"
+            f"All iteration results:\n\n{history}\n\n"
+            "Max iterations reached. Provide a final report summarizing "
+            "what was accomplished and what remains incomplete."
+        )
+        printer = StreamPrinter(
+            phase="reporting", phase_detail="final report",
+        )
         response = await self.client.collect_stream(
-            messages=messages,
+            messages=[
+                {"role": "system", "content": get_orchestrator_prompt(self._cwd)},
+                {"role": "user", "content": prompt},
+            ],
             model_role=ModelRole.PRO,
-            on_token=on_token,
+            on_token=printer.on_token,
         )
+        printer.finish()
         return strip_dsml(response.get("content") or "")
 
     async def compact(self, on_token: Any = None) -> str:

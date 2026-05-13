@@ -11,7 +11,7 @@ import sys
 import time
 from typing import TYPE_CHECKING, Any, Optional
 
-from rich.console import Console
+from rich.console import Console, Group
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
@@ -325,7 +325,8 @@ def _format_elapsed(seconds: float) -> str:
 _PHASE_STYLES: dict[str, tuple[str, str]] = {
     "planning": ("blue", "Pro"),
     "executing": ("yellow", "Flash"),
-    "verifying": ("green", "Pro"),
+    "verifying": ("red", "Pro"),
+    "reporting": ("green", "Pro"),
 }
 
 
@@ -888,6 +889,8 @@ class StreamPrinter:
         self._start = 0.0
         self._phase_live: Live | None = None
         self._phase_timer: asyncio.Task[None] | None = None
+        self._header_committed = False
+        self._streaming_timer: asyncio.Task[None] | None = None
         if phase:
             self._start_phase()
 
@@ -937,15 +940,47 @@ class StreamPrinter:
             except Exception:
                 pass
             self._phase_live = None
-        if self._phase:
-            elapsed = time.monotonic() - self._start
-            t = _format_elapsed(elapsed)
-            color, model = _PHASE_STYLES.get(self._phase, ("cyan", ""))
-            detail_s = f"  [dim]{self._phase_detail}[/dim]" if self._phase_detail else ""
-            console.print(
-                f"\n  [{color}]●[/{color}] [bold]{self._phase.upper()}[/bold]"
-                f" [dim]({model})[/dim]{detail_s}  [dim]{t}[/dim]"
-            )
+
+    def _print_phase_header(self) -> None:
+        """Commit phase header as static console output."""
+        if not self._phase or self._header_committed:
+            return
+        self._header_committed = True
+        elapsed = time.monotonic() - self._start
+        t = _format_elapsed(elapsed)
+        color, model = _PHASE_STYLES.get(self._phase, ("cyan", ""))
+        detail_s = (
+            f"  [dim]{self._phase_detail}[/dim]"
+            if self._phase_detail else ""
+        )
+        console.print(
+            f"\n  [{color}]●[/{color}] [bold]{self._phase.upper()}[/bold]"
+            f" [dim]({model})[/dim]{detail_s}  [dim]{t}[/dim]"
+        )
+
+    def _build_renderable(self) -> Any:
+        """Build combined renderable: phase header + markdown content."""
+        parts: list[Any] = []
+        if self._phase and not self._header_committed:
+            parts.append(self._render_phase())
+        pending = self._get_pending()
+        if pending.strip():
+            parts.append(Markdown(pending))
+        if not parts:
+            return Text("")
+        if len(parts) == 1:
+            return parts[0]
+        return Group(*parts)
+
+    async def _streaming_timer_loop(self) -> None:
+        """Keep Live updated for elapsed time changes during streaming."""
+        try:
+            while True:
+                if self._live:
+                    self._live.update(self._build_renderable())
+                await asyncio.sleep(0.5)
+        except asyncio.CancelledError:
+            pass
 
     def _get_pending(self) -> str:
         return self.get_content()[self._committed_len:]
@@ -954,12 +989,52 @@ class StreamPrinter:
         pending = self._get_pending()
         if pending.count("```") % 2 != 0:
             return False
-        return pending.rstrip().endswith("\n")
+        return pending.rstrip(" \t").endswith("\n")
 
-    def _flush(self) -> None:
+    def _find_safe_split(self, pending: str) -> int:
+        """Find split point before the last unclosed code fence.
+
+        Returns character offset in pending, or 0 if no safe point.
+        """
+        positions: list[int] = []
+        i = 0
+        while i < len(pending):
+            if pending[i:i + 3] == "```":
+                positions.append(i)
+                i += 3
+            else:
+                i += 1
+        if not positions or len(positions) % 2 == 0:
+            return 0
+        fence_start = positions[-1]
+        if fence_start == 0:
+            return 0
+        split = pending.rfind("\n", 0, fence_start)
+        return split + 1 if split >= 0 else 0
+
+    def _flush_partial(self, n: int) -> None:
+        """Flush the first *n* characters of pending content."""
+        if self._streaming_timer:
+            self._streaming_timer.cancel()
+            self._streaming_timer = None
         if self._live:
             self._live.stop()
             self._live = None
+        self._print_phase_header()
+        chunk = self._get_pending()[:n]
+        if chunk.strip():
+            console.print()
+            console.print(Markdown(chunk))
+        self._committed_len += n
+
+    def _flush(self) -> None:
+        if self._streaming_timer:
+            self._streaming_timer.cancel()
+            self._streaming_timer = None
+        if self._live:
+            self._live.stop()
+            self._live = None
+        self._print_phase_header()
         pending = self._get_pending()
         if pending.strip():
             console.print()
@@ -973,35 +1048,37 @@ class StreamPrinter:
 
         pending = self._get_pending()
         term_h = shutil.get_terminal_size((80, 24)).lines
+        needs_flush = (
+            pending.count("\n") >= term_h - 8
+            or len(pending) > 3000
+        )
 
-        # Flush to console when content nears terminal height.
-        # This prevents Rich's Live display from overflowing the terminal.
-        # Live manages a fixed screen region — it never scrolls, so we must
-        # flush content to the real console where normal scrolling works.
-        if pending.count("\n") >= term_h - 8 and self._safe_to_flush():
-            self._flush()
-            return
-
-        # Force-flush safety valve: when pending content is very large,
-        # flush regardless of _safe_to_flush(). This prevents the screen
-        # from appearing "stuck" when long code fences or continuous text
-        # prevent safe-to-flush from returning True for too long.
-        if len(pending) > 3000:
-            self._flush()
-            return
+        if needs_flush:
+            if self._safe_to_flush():
+                self._flush()
+                return
+            # Inside a code fence — flush content before the fence
+            split = self._find_safe_split(pending)
+            if split > 0:
+                self._flush_partial(split)
+                return
 
         if not self._live:
             self._live = Live(
-                Markdown(""),
+                self._build_renderable(),
                 console=console,
                 refresh_per_second=8,
                 transient=True,
             )
             self._live.start()
+            if self._phase and not self._header_committed:
+                self._streaming_timer = asyncio.create_task(
+                    self._streaming_timer_loop()
+                )
         now = time.monotonic()
         if now - self._last_update >= self._UPDATE_INTERVAL:
             self._last_update = now
-            self._live.update(Markdown(self._get_pending()))
+            self._live.update(self._build_renderable())
         if self._status_panel:
             self._status_panel.refresh()
 
@@ -1009,11 +1086,15 @@ class StreamPrinter:
         return "".join(self._buffer)
 
     def finish(self) -> None:
+        if self._streaming_timer:
+            self._streaming_timer.cancel()
+            self._streaming_timer = None
         if self._phase_live:
             self._stop_phase()
         if self._live:
             self._live.stop()
             self._live = None
+        self._print_phase_header()
         pending = self._get_pending()
         if pending.strip():
             console.print()
