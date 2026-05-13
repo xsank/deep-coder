@@ -35,7 +35,6 @@ Output ONLY the JSON block. No explanation."""
 
 
 class RememberSkill(Skill):
-
     @property
     def name(self) -> str:
         return "/remember"
@@ -79,9 +78,7 @@ class RememberSkill(Skill):
         )
         path = store.save(memory, local=local)
         scope = "project" if local else "global"
-        print_success(
-            f"Remembered: {memory.name} ({memory.type.value}, {scope})"
-        )
+        print_success(f"Remembered: {memory.name} ({memory.type.value}, {scope})")
         console.print(f"  [dim]{path}[/dim]")
         ctx.orchestrator.invalidate_prompt_cache()
 
@@ -110,7 +107,6 @@ class RememberSkill(Skill):
 
 
 class MemorySkill(Skill):
-
     @property
     def name(self) -> str:
         return "/memory"
@@ -156,6 +152,7 @@ class MemorySkill(Skill):
             return
 
         from rich.table import Table
+
         table = Table(show_header=True, header_style="bold", padding=(0, 1))
         table.add_column("ID", style="cyan", no_wrap=True)
         table.add_column("Type", style="yellow")
@@ -193,15 +190,18 @@ class MemorySkill(Skill):
             print_error(f"Memory not found: {memory_id}")
             return
         from rich.panel import Panel
+
         console.print()
-        console.print(Panel(
-            f"[yellow]{mem.type.value}[/yellow] | "
-            f"Created: {mem.created} | Scope: {mem.source}\n\n"
-            f"{mem.content}",
-            title=f"[bold]{mem.name}[/bold]",
-            subtitle=f"[dim]{mem.id}[/dim]",
-            border_style="cyan",
-        ))
+        console.print(
+            Panel(
+                f"[yellow]{mem.type.value}[/yellow] | "
+                f"Created: {mem.created} | Scope: {mem.source}\n\n"
+                f"{mem.content}",
+                title=f"[bold]{mem.name}[/bold]",
+                subtitle=f"[dim]{mem.id}[/dim]",
+                border_style="cyan",
+            )
+        )
 
     async def _cmd_delete(self, store: MemoryStore, memory_id: str, ctx: SkillContext) -> None:
         if not memory_id:

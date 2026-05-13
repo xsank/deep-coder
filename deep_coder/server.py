@@ -36,11 +36,13 @@ class DeepCoderServer:
 
     async def _health_handler(self, request: web.Request) -> web.Response:
         usage = self._client.usage
-        return web.json_response({
-            "status": "ok",
-            "requests": usage.total_requests,
-            "cost": round(usage.total_cost, 6),
-        })
+        return web.json_response(
+            {
+                "status": "ok",
+                "requests": usage.total_requests,
+                "cost": round(usage.total_cost, 6),
+            }
+        )
 
     async def _ws_handler(self, request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse()
@@ -67,7 +69,8 @@ class DeepCoderServer:
                 self._resolve_approval(msg.get("id", ""), msg.get("approved", False))
             elif msg_type == "plan_approval_response":
                 self._resolve_plan_approval(
-                    msg.get("id", ""), msg.get("decision", "yes"),
+                    msg.get("id", ""),
+                    msg.get("decision", "yes"),
                 )
             else:
                 await self._send(ws, {"type": "error", "message": f"Unknown type: {msg_type}"})
@@ -89,12 +92,15 @@ class DeepCoderServer:
             req_id = uuid.uuid4().hex[:8]
             future: asyncio.Future[bool] = asyncio.get_event_loop().create_future()
             self._approval_futures[req_id] = future
-            await self._send(ws, {
-                "type": "approval",
-                "id": req_id,
-                "tool": tool_name,
-                "arguments": arguments,
-            })
+            await self._send(
+                ws,
+                {
+                    "type": "approval",
+                    "id": req_id,
+                    "tool": tool_name,
+                    "arguments": arguments,
+                },
+            )
             try:
                 return await asyncio.wait_for(future, timeout=300)
             except asyncio.TimeoutError:
@@ -103,18 +109,22 @@ class DeepCoderServer:
                 self._approval_futures.pop(req_id, None)
 
         async def on_plan_approval(
-            plan_desc: str, tasks_info: list[dict[str, Any]],
+            plan_desc: str,
+            tasks_info: list[dict[str, Any]],
         ) -> str:
             req_id = uuid.uuid4().hex[:8]
             loop = asyncio.get_event_loop()
             future: asyncio.Future[str] = loop.create_future()
             self._plan_approval_futures[req_id] = future
-            await self._send(ws, {
-                "type": "plan_approval",
-                "id": req_id,
-                "description": plan_desc,
-                "tasks": tasks_info,
-            })
+            await self._send(
+                ws,
+                {
+                    "type": "plan_approval",
+                    "id": req_id,
+                    "description": plan_desc,
+                    "tasks": tasks_info,
+                },
+            )
             try:
                 return await asyncio.wait_for(future, timeout=300)
             except asyncio.TimeoutError:
@@ -135,12 +145,15 @@ class DeepCoderServer:
             result = await self._current_task
 
             usage = self._client.usage
-            await self._send(ws, {
-                "type": "cost",
-                "pro_tokens": usage.pro_prompt_tokens + usage.pro_completion_tokens,
-                "flash_tokens": usage.flash_prompt_tokens + usage.flash_completion_tokens,
-                "cost": round(usage.total_cost, 6),
-            })
+            await self._send(
+                ws,
+                {
+                    "type": "cost",
+                    "pro_tokens": usage.pro_prompt_tokens + usage.pro_completion_tokens,
+                    "flash_tokens": usage.flash_prompt_tokens + usage.flash_completion_tokens,
+                    "cost": round(usage.total_cost, 6),
+                },
+            )
             await self._send(ws, {"type": "done", "content": result})
         except (KeyboardInterrupt, asyncio.CancelledError):
             await self._send(ws, {"type": "error", "message": "Cancelled"})
@@ -155,24 +168,32 @@ class DeepCoderServer:
             await self._send(ws, {"type": "done", "content": "History cleared."})
         elif command == "/cost":
             u = self._client.usage
-            await self._send(ws, {
-                "type": "done",
-                "content": (
-                    f"Pro: {u.pro_prompt_tokens + u.pro_completion_tokens:,} tokens, "
-                    f"Flash: {u.flash_prompt_tokens + u.flash_completion_tokens:,} tokens, "
-                    f"Cost: ${u.total_cost:.4f}"
-                ),
-            })
+            await self._send(
+                ws,
+                {
+                    "type": "done",
+                    "content": (
+                        f"Pro: {u.pro_prompt_tokens + u.pro_completion_tokens:,} tokens, "
+                        f"Flash: {u.flash_prompt_tokens + u.flash_completion_tokens:,} tokens, "
+                        f"Cost: ${u.total_cost:.4f}"
+                    ),
+                },
+            )
         elif command.startswith("/compact"):
+
             async def on_token(t: str) -> None:
                 await self._send(ws, {"type": "token", "content": t})
+
             summary = await self._orchestrator.compact(on_token=on_token)
             await self._send(ws, {"type": "done", "content": summary})
         else:
-            await self._send(ws, {
-                "type": "error",
-                "message": f"Unknown command: {command}",
-            })
+            await self._send(
+                ws,
+                {
+                    "type": "error",
+                    "message": f"Unknown command: {command}",
+                },
+            )
 
     def _cancel_current(self) -> None:
         if self._current_task and not self._current_task.done():

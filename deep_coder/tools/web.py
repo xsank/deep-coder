@@ -18,7 +18,8 @@ _USER_AGENT = (
 )
 
 _SCRIPT_STYLE_RE = re.compile(
-    r"<(script|style|noscript)[^>]*>.*?</\1>", re.DOTALL | re.IGNORECASE,
+    r"<(script|style|noscript)[^>]*>.*?</\1>",
+    re.DOTALL | re.IGNORECASE,
 )
 _TAG_RE = re.compile(r"<[^>]+>")
 _MULTI_NEWLINE_RE = re.compile(r"\n{3,}")
@@ -104,7 +105,8 @@ class WebSearchTool(Tool):
                 await asyncio.sleep(1.5 * attempt)
             try:
                 async with httpx.AsyncClient(
-                    timeout=20, follow_redirects=True,
+                    timeout=20,
+                    follow_redirects=True,
                 ) as client:
                     resp = await client.post(
                         "https://html.duckduckgo.com/html/",
@@ -203,7 +205,8 @@ class WebFetchTool(Tool):
                 await asyncio.sleep(1.5 * attempt)
             try:
                 async with httpx.AsyncClient(
-                    timeout=25, follow_redirects=True,
+                    timeout=25,
+                    follow_redirects=True,
                 ) as client:
                     resp = await client.get(
                         url,

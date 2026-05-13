@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-
 from deep_coder.agent.task import Plan, Task, TaskStatus
 
 

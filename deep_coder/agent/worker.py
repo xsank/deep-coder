@@ -14,9 +14,7 @@ from deep_coder.tools.base import Tool, ToolRegistry
 
 OnWorkerStatus = Optional[Callable[[str, str, str], Coroutine[Any, Any, None]]]
 OnApprove = Optional[Callable[[str, str], Coroutine[Any, Any, bool]]]
-OnToolAction = Optional[
-    Callable[[str, str, str, str, str], Coroutine[Any, Any, None]]
-]
+OnToolAction = Optional[Callable[[str, str, str, str, str], Coroutine[Any, Any, None]]]
 
 
 def _make_assistant_msg(response: dict[str, Any]) -> dict[str, Any]:
@@ -74,8 +72,10 @@ class Worker:
         if cached_memories is not None:
             prompt_kwargs["cached_memories"] = cached_memories
         system_prompt = get_worker_prompt(
-            task.description, task.context,
-            cwd=self._cwd, conversation_summary=conversation_summary,
+            task.description,
+            task.context,
+            cwd=self._cwd,
+            conversation_summary=conversation_summary,
             **prompt_kwargs,
         )
         messages: list[dict[str, Any]] = [
@@ -110,21 +110,27 @@ class Worker:
                     tool_name = fn["name"]
 
                     args_summary = summarize_tool_args(
-                        tool_name, fn["arguments"],
+                        tool_name,
+                        fn["arguments"],
                     )
                     display_detail = tool_name
                     if args_summary:
                         display_detail += f": {args_summary}"
                     if on_worker_status:
                         await on_worker_status(
-                            task.id, "running", display_detail,
+                            task.id,
+                            "running",
+                            display_detail,
                         )
                     if on_status:
                         await on_status(task, f"tool:{tool_name}")
                     if on_tool_action:
                         await on_tool_action(
-                            task.id, tool_name, args_summary,
-                            "start", "",
+                            task.id,
+                            tool_name,
+                            args_summary,
+                            "start",
+                            "",
                         )
 
                     tool_obj = self.tool_registry.get(tool_name)
@@ -132,23 +138,30 @@ class Worker:
                         approved = self._should_auto_approve(tool_obj)
                         if not approved and on_approve:
                             approved = await on_approve(
-                                tool_name, fn["arguments"],
+                                tool_name,
+                                fn["arguments"],
                             )
                         if not approved:
-                            messages.append({
-                                "role": "tool",
-                                "tool_call_id": tc["id"],
-                                "content": "User denied this operation.",
-                            })
+                            messages.append(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": tc["id"],
+                                    "content": "User denied this operation.",
+                                }
+                            )
                             if on_tool_action:
                                 await on_tool_action(
-                                    task.id, tool_name,
-                                    args_summary, "failed", "denied",
+                                    task.id,
+                                    tool_name,
+                                    args_summary,
+                                    "failed",
+                                    "denied",
                                 )
                             continue
 
                     result = await self.tool_registry.dispatch(
-                        tool_name, fn["arguments"],
+                        tool_name,
+                        fn["arguments"],
                     )
                     if result.success and result.metadata and "old_content" in result.metadata:
                         print_file_diff(
@@ -157,19 +170,26 @@ class Worker:
                             result.metadata["new_content"],
                         )
                     brief = summarize_tool_result(
-                        tool_name, result.content, result.success,
+                        tool_name,
+                        result.content,
+                        result.success,
                     )
                     if on_tool_action:
                         st = "done" if result.success else "failed"
                         await on_tool_action(
-                            task.id, tool_name, args_summary,
-                            st, brief,
+                            task.id,
+                            tool_name,
+                            args_summary,
+                            st,
+                            brief,
                         )
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc["id"],
-                        "content": result.content,
-                    })
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc["id"],
+                            "content": result.content,
+                        }
+                    )
             else:
                 content = strip_dsml(response.get("content") or "")
                 task.mark_completed(content)

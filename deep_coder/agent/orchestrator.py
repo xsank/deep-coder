@@ -21,9 +21,7 @@ from deep_coder.models import ModelRole
 from deep_coder.prompts.system import get_orchestrator_prompt
 from deep_coder.tools.base import ToolRegistry
 
-OnPlanApproval = Optional[
-    Callable[[str, list[dict[str, Any]]], Coroutine[Any, Any, str]]
-]
+OnPlanApproval = Optional[Callable[[str, list[dict[str, Any]]], Coroutine[Any, Any, str]]]
 
 
 def _make_assistant_msg(response: dict[str, Any]) -> dict[str, Any]:
@@ -63,6 +61,7 @@ class Orchestrator:
     def _ensure_prompt_cache(self) -> None:
         if not self._prompt_cache_loaded:
             from deep_coder.prompts.system import _find_coder_md, _load_memories
+
             self._cached_coder_md = _find_coder_md(self._cwd)
             self._cached_memories = _load_memories(self._cwd)
             self._prompt_cache_loaded = True
@@ -77,9 +76,23 @@ class Orchestrator:
         self._on_plan_approval = handler
 
     _GREETING_PREFIXES = (
-        "hi", "hello", "hey", "thanks", "thank you", "ok", "okay",
-        "good morning", "good afternoon", "good evening", "good night",
-        "你好", "谢谢", "早上好", "晚上好", "再见", "bye",
+        "hi",
+        "hello",
+        "hey",
+        "thanks",
+        "thank you",
+        "ok",
+        "okay",
+        "good morning",
+        "good afternoon",
+        "good evening",
+        "good night",
+        "你好",
+        "谢谢",
+        "早上好",
+        "晚上好",
+        "再见",
+        "bye",
     )
 
     def _is_simple_greeting(self, message: str) -> bool:
@@ -109,10 +122,12 @@ class Orchestrator:
         if self._is_simple_greeting(user_message):
             response = await self.client.collect_stream(
                 messages=[
-                    {"role": "system", "content": (
-                        "You are Deep Coder, a helpful coding assistant. "
-                        "Be brief and friendly."
-                    )},
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are Deep Coder, a helpful coding assistant. Be brief and friendly."
+                        ),
+                    },
                     {"role": "user", "content": user_message},
                 ],
                 model_role=ModelRole.FLASH,
@@ -123,11 +138,13 @@ class Orchestrator:
             return content
 
         from deep_coder.context import collect_project_context
+
         project_ctx = await collect_project_context(self._cwd)
 
         self._ensure_prompt_cache()
         system_prompt = get_orchestrator_prompt(
-            self._cwd, project_context=project_ctx,
+            self._cwd,
+            project_context=project_ctx,
             cached_coder_md=self._cached_coder_md,
             cached_memories=self._cached_memories,
         )
@@ -154,30 +171,34 @@ class Orchestrator:
             plan = await self._retry_for_plan(content, system_prompt)
         if plan and len(plan.tasks) > 0:
             plan_tasks_info = [
-                {"id": t.id, "desc": t.description[:128] + ("..." if len(t.description) > 128 else ""), "deps": t.depends_on}
+                {
+                    "id": t.id,
+                    "desc": t.description[:128] + ("..." if len(t.description) > 128 else ""),
+                    "deps": t.depends_on,
+                }
                 for t in plan.tasks
             ]
             print_plan_summary(plan.description, plan_tasks_info)
 
             if self._on_plan_approval:
                 approval = await self._on_plan_approval(
-                    plan.description, plan_tasks_info,
+                    plan.description,
+                    plan_tasks_info,
                 )
                 if approval == "no":
-                    self.conversation.append({
-                        "role": "assistant",
-                        "content": "(Plan rejected by user)",
-                    })
+                    self.conversation.append(
+                        {
+                            "role": "assistant",
+                            "content": "(Plan rejected by user)",
+                        }
+                    )
                     return ""
                 if approval != "yes":
                     self.conversation.append(
                         _make_assistant_msg(response),
                     )
                     if self._plan_revision_depth >= 3:
-                        console.print(
-                            "  [warning]Max revisions reached."
-                            "[/warning]"
-                        )
+                        console.print("  [warning]Max revisions reached.[/warning]")
                         return ""
                     self._plan_revision_depth += 1
                     edit_msg = (
@@ -197,7 +218,9 @@ class Orchestrator:
 
             try:
                 result = await self._run_plan_loop(
-                    plan, user_message, on_token,
+                    plan,
+                    user_message,
+                    on_token,
                 )
             except (KeyboardInterrupt, asyncio.CancelledError):
                 raise KeyboardInterrupt("Interrupted during execution")
@@ -208,7 +231,7 @@ class Orchestrator:
         if on_token and content:
             chunk_size = 20
             for i in range(0, len(content), chunk_size):
-                await on_token(content[i:i + chunk_size])
+                await on_token(content[i : i + chunk_size])
 
         self.conversation.append(_make_assistant_msg(response))
         return content
@@ -228,7 +251,9 @@ class Orchestrator:
         return None
 
     async def _retry_for_plan(
-        self, first_response: str, system_prompt: str,
+        self,
+        first_response: str,
+        system_prompt: str,
     ) -> Optional[Plan]:
         """Re-prompt the Pro model to produce a JSON task plan."""
         retry_msg = (
@@ -236,7 +261,7 @@ class Orchestrator:
             "You MUST delegate to workers — you cannot read files, "
             "write code, or run commands yourself.\n\n"
             "Re-analyze the user's request and output a task plan in "
-            "```json format with {\"plan\": \"...\", \"tasks\": [...]}."
+            '```json format with {"plan": "...", "tasks": [...]}.'
         )
         messages = (
             [{"role": "system", "content": system_prompt}]
@@ -255,7 +280,7 @@ class Orchestrator:
 
     def _build_conversation_summary(self, max_exchanges: int = 20) -> str:
         """Build a compact summary of recent conversation for worker context."""
-        recent = self.conversation[-(max_exchanges * 2):]
+        recent = self.conversation[-(max_exchanges * 2) :]
         parts: list[str] = []
         for msg in recent:
             role = msg.get("role", "")
@@ -289,12 +314,18 @@ class Orchestrator:
                     progress.resume()
 
         async def on_tool_action(
-            task_id: str, tool_name: str, args_summary: str,
-            status: str, result_brief: str,
+            task_id: str,
+            tool_name: str,
+            args_summary: str,
+            status: str,
+            result_brief: str,
         ) -> None:
             progress.add_tool_action(
-                task_id, tool_name, args_summary,
-                status, result_brief,
+                task_id,
+                tool_name,
+                args_summary,
+                status,
+                result_brief,
             )
 
         self._ensure_prompt_cache()
@@ -316,10 +347,13 @@ class Orchestrator:
                             if dep and dep.result:
                                 dep_results.append(f"[{dep_id}]: {dep.result[:3000]}")
                         if dep_results:
-                            task.context += "\n\nCompleted dependency results:\n" + "\n".join(dep_results)
+                            task.context += "\n\nCompleted dependency results:\n" + "\n".join(
+                                dep_results
+                            )
                 coros = [
                     self._run_worker(
-                        task, on_worker_status=on_worker_status,
+                        task,
+                        on_worker_status=on_worker_status,
                         on_approve=on_approve_with_pause,
                         on_tool_action=on_tool_action,
                         conversation_summary=conv_summary,
@@ -328,15 +362,21 @@ class Orchestrator:
                 ]
                 await asyncio.gather(*coros)
 
-            failed_tasks = [t for t in plan.tasks if t.status == TaskStatus.FAILED and t.retry_count == 0]
+            failed_tasks = [
+                t for t in plan.tasks if t.status == TaskStatus.FAILED and t.retry_count == 0
+            ]
             if failed_tasks:
                 for task in failed_tasks:
                     task.mark_retrying()
-                    task.context += f"\n\nPrevious attempt failed with error: {task.error}\nPlease try a different approach."
+                    task.context += (
+                        f"\n\nPrevious attempt failed with error: {task.error}"
+                        "\nPlease try a different approach."
+                    )
                     await on_worker_status(task.id, "running", "retrying")
                 retry_coros = [
                     self._run_worker(
-                        task, on_worker_status=on_worker_status,
+                        task,
+                        on_worker_status=on_worker_status,
                         on_approve=on_approve_with_pause,
                         on_tool_action=on_tool_action,
                         conversation_summary=conv_summary,
@@ -349,7 +389,9 @@ class Orchestrator:
 
         completed = sum(1 for t in plan.tasks if t.status == TaskStatus.COMPLETED)
         failed = sum(1 for t in plan.tasks if t.status == TaskStatus.FAILED)
-        retried = sum(1 for t in plan.tasks if t.retry_count > 0 and t.status == TaskStatus.COMPLETED)
+        retried = sum(
+            1 for t in plan.tasks if t.retry_count > 0 and t.status == TaskStatus.COMPLETED
+        )
         summary_parts = [f"[green]{completed} completed[/green]"]
         if retried:
             summary_parts.append(f"[yellow]{retried} recovered[/yellow]")
@@ -413,26 +455,25 @@ class Orchestrator:
             all_round_summaries.append(summary)
 
             status, reason, body = await self._verify_and_decide(
-                plan, user_message, all_round_summaries,
+                plan,
+                user_message,
+                all_round_summaries,
             )
 
             if status == "complete":
                 return body
 
-            console.print(
-                f"  [yellow]↻[/yellow] [dim]iteration "
-                f"{iteration + 1}: {reason}[/dim]"
-            )
+            console.print(f"  [yellow]↻[/yellow] [dim]iteration {iteration + 1}: {reason}[/dim]")
             new_plan = self._try_extract_plan(body)
             if not new_plan or not new_plan.tasks:
                 return body
             plan = new_plan
 
-        console.print(
-            "  [yellow]●[/yellow] [dim]max iterations reached[/dim]"
-        )
+        console.print("  [yellow]●[/yellow] [dim]max iterations reached[/dim]")
         return await self._force_final_report(
-            user_message, all_round_summaries, on_token,
+            user_message,
+            all_round_summaries,
+            on_token,
         )
 
     def _build_round_summary(self, plan: Plan, iteration: int) -> str:
@@ -445,11 +486,36 @@ class Orchestrator:
         return "\n".join(parts)
 
     _ANALYSIS_KEYWORDS = (
-        "分析", "解释", "explain", "analyze", "analysis", "how does",
-        "how do", "what is", "what are", "读", "read", "show", "展示",
-        "查看", "review", "describe", "介绍", "理解", "understand",
-        "看看", "说明", "详细", "detail", "具体", "代码", "实现",
-        "implementation", "architecture", "架构", "原理",
+        "分析",
+        "解释",
+        "explain",
+        "analyze",
+        "analysis",
+        "how does",
+        "how do",
+        "what is",
+        "what are",
+        "读",
+        "read",
+        "show",
+        "展示",
+        "查看",
+        "review",
+        "describe",
+        "介绍",
+        "理解",
+        "understand",
+        "看看",
+        "说明",
+        "详细",
+        "detail",
+        "具体",
+        "代码",
+        "实现",
+        "implementation",
+        "architecture",
+        "架构",
+        "原理",
     )
 
     def _is_analysis_request(self, request: str) -> bool:
@@ -477,7 +543,7 @@ class Orchestrator:
             "- If complete: provide the final report to the user."
             f"{analysis_hint}\n"
             "- If continue: provide a NEW task plan in ```json format "
-            "with {\"plan\": \"...\", \"tasks\": [...]} to address the gaps.\n"
+            'with {"plan": "...", "tasks": [...]} to address the gaps.\n'
         )
 
     async def _verify_and_decide(
@@ -497,9 +563,7 @@ class Orchestrator:
             st = "COMPLETED" if task.status == TaskStatus.COMPLETED else "FAILED"
             result_text = task.result or task.error or "No output"
             current_results.append(
-                f"### {task.id} [{st}]\n"
-                f"Description: {task.description}\n"
-                f"Result: {result_text}\n"
+                f"### {task.id} [{st}]\nDescription: {task.description}\nResult: {result_text}\n"
             )
 
         history_block = ""
@@ -545,7 +609,9 @@ class Orchestrator:
                 return
 
             match = re.search(
-                r"```json\s*(\{.*?\})\s*```", text, re.DOTALL,
+                r"```json\s*(\{.*?\})\s*```",
+                text,
+                re.DOTALL,
             )
             if not match:
                 return
@@ -566,7 +632,7 @@ class Orchestrator:
                     phase_detail="generating report",
                     skip_spinner=True,
                 )
-                rest = text[match.end():].lstrip("\n")
+                rest = text[match.end() :].lstrip("\n")
                 if rest:
                     await report_printer.on_token(rest)
 
@@ -604,7 +670,9 @@ class Orchestrator:
     def _parse_verdict(self, content: str) -> tuple[str, str, str]:
         """Parse verdict JSON + body → (status, reason, body)."""
         match = re.search(
-            r"```json\s*(\{.*?\})\s*```", content, re.DOTALL,
+            r"```json\s*(\{.*?\})\s*```",
+            content,
+            re.DOTALL,
         )
         if match:
             try:
@@ -612,7 +680,7 @@ class Orchestrator:
                 if "status" in verdict and set(verdict.keys()) <= {"status", "reason"}:
                     status = verdict.get("status", "complete")
                     reason = verdict.get("reason", "")
-                    body = content[match.end():].strip()
+                    body = content[match.end() :].strip()
                     return status, reason, body
             except json.JSONDecodeError:
                 pass
@@ -625,6 +693,7 @@ class Orchestrator:
         on_token: Any = None,
     ) -> str:
         from deep_coder.display import StreamPrinter
+
         history = "\n\n---\n\n".join(all_round_summaries)
         prompt = (
             f"Original request: {original_request}\n\n"
@@ -639,7 +708,8 @@ class Orchestrator:
             cached_memories=self._cached_memories,
         )
         printer = StreamPrinter(
-            phase="reporting", phase_detail="final report",
+            phase="reporting",
+            phase_detail="final report",
         )
         response = await self.client.collect_stream(
             messages=[

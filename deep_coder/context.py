@@ -6,13 +6,29 @@ import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 
-_SKIP_DIRS = frozenset({
-    ".git", ".hg", ".svn",
-    "node_modules", "__pycache__", ".venv", "venv", ".env",
-    ".tox", ".mypy_cache", ".pytest_cache", ".ruff_cache",
-    "dist", "build", ".eggs", "*.egg-info",
-    ".idea", ".vscode", ".cursor",
-})
+_SKIP_DIRS = frozenset(
+    {
+        ".git",
+        ".hg",
+        ".svn",
+        "node_modules",
+        "__pycache__",
+        ".venv",
+        "venv",
+        ".env",
+        ".tox",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        "dist",
+        "build",
+        ".eggs",
+        "*.egg-info",
+        ".idea",
+        ".vscode",
+        ".cursor",
+    }
+)
 
 _MAX_STATUS_LINES = 100
 _MAX_TREE_LINES = 200
@@ -45,7 +61,8 @@ class ProjectContext:
 async def _run_git(cwd: str, *args: str) -> tuple[int, str]:
     try:
         proc = await asyncio.create_subprocess_exec(
-            "git", *args,
+            "git",
+            *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,

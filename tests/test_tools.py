@@ -8,8 +8,8 @@ import tempfile
 import pytest
 
 from deep_coder.tools.base import ToolRegistry, create_default_registry
-from deep_coder.tools.file_ops import EditFileTool, ListFilesTool, ReadFileTool, WriteFileTool
-from deep_coder.tools.search import GlobFilesTool, GrepFilesTool
+from deep_coder.tools.file_ops import EditFileTool, ReadFileTool, WriteFileTool
+from deep_coder.tools.search import GrepFilesTool
 from deep_coder.tools.shell import ExecShellTool
 
 

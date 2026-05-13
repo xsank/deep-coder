@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from deep_coder.agent.orchestrator import Orchestrator
@@ -53,7 +53,8 @@ class Skill(ABC):
 
     async def _run_git(self, *args: str, cwd: str | None = None) -> tuple[int, str, str]:
         proc = await asyncio.create_subprocess_exec(
-            "git", *args,
+            "git",
+            *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
@@ -65,7 +66,12 @@ class Skill(ABC):
             stderr.decode("utf-8", errors="replace"),
         )
 
-    async def _run_shell(self, cmd: str, cwd: str | None = None, timeout: int = 120) -> tuple[int, str, str]:
+    async def _run_shell(
+        self,
+        cmd: str,
+        cwd: str | None = None,
+        timeout: int = 120,
+    ) -> tuple[int, str, str]:
         proc = await asyncio.create_subprocess_shell(
             cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -83,7 +89,12 @@ class Skill(ABC):
             stderr.decode("utf-8", errors="replace"),
         )
 
-    async def _stream_to_console(self, ctx: SkillContext, prompt: str, use_tools: bool = False) -> str:
+    async def _stream_to_console(
+        self,
+        ctx: SkillContext,
+        prompt: str,
+        use_tools: bool = False,
+    ) -> str:
         """Send a prompt through the orchestrator and stream the response."""
         from deep_coder.display import StreamPrinter, print_response
 
@@ -96,9 +107,13 @@ class Skill(ABC):
             )
         else:
             from deep_coder.models import ModelRole
+
             response = await ctx.client.collect_stream(
                 messages=[
-                    {"role": "system", "content": "You are Deep Coder, an expert software engineer."},
+                    {
+                        "role": "system",
+                        "content": "You are Deep Coder, an expert software engineer.",
+                    },
                     {"role": "user", "content": prompt},
                 ],
                 model_role=ModelRole.PRO,

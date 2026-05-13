@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +40,7 @@ def _find_coder_md(cwd: str | None) -> str | None:
 
 def _load_memories(cwd: str | None) -> str | None:
     from deep_coder.memory import MemoryStore
+
     store = MemoryStore(cwd=cwd)
     return store.get_prompt_section(max_chars=MAX_MEMORY_CHARS)
 
@@ -63,9 +63,7 @@ def get_orchestrator_prompt(
     if cwd:
         context_parts.append(f"\n## Current Working Directory\n{cwd}")
     if project_context:
-        context_parts.append(
-            f"\n## Project Status\n{project_context.format_for_prompt()}"
-        )
+        context_parts.append(f"\n## Project Status\n{project_context.format_for_prompt()}")
     return "\n".join(context_parts)
 
 

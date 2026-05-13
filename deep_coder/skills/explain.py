@@ -82,16 +82,17 @@ class ExplainSkill(Skill):
             start_idx = max(0, start_line - 1)
             end_idx = min(len(lines), end_line) if end_line else min(len(lines), start_idx + 30)
             numbered = "\n".join(
-                f"{i + start_idx + 1:4d} | {line}" for i, line in enumerate(lines[start_idx:end_idx])
+                f"{i + start_idx + 1:4d} | {line}"
+                for i, line in enumerate(lines[start_idx:end_idx])
             )
             location = f"{file_part}:{start_line}-{end_idx}"
             print_info(f"Explaining {location}...")
         else:
             if len(lines) > 200:
-                numbered = "\n".join(f"{i+1:4d} | {line}" for i, line in enumerate(lines[:200]))
+                numbered = "\n".join(f"{i + 1:4d} | {line}" for i, line in enumerate(lines[:200]))
                 numbered += f"\n... ({len(lines) - 200} more lines)"
             else:
-                numbered = "\n".join(f"{i+1:4d} | {line}" for i, line in enumerate(lines))
+                numbered = "\n".join(f"{i + 1:4d} | {line}" for i, line in enumerate(lines))
             location = file_part
             print_info(f"Explaining {location}...")
 

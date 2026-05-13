@@ -10,7 +10,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
@@ -27,7 +27,6 @@ from deep_coder.display import (
     console,
     print_banner,
     print_error,
-    print_help,
     print_info,
     print_response,
     print_success,
@@ -163,6 +162,7 @@ class CommandHandler:
 
     async def _cmd_help(self, _: str) -> bool:
         from deep_coder.display import print_help_extended
+
         print_help_extended()
         return False
 
@@ -178,7 +178,8 @@ class CommandHandler:
         console.print(f"  Pro model:   {c.model.pro_model}")
         console.print(f"  Flash model: {c.model.flash_model}")
         console.print(f"  Base URL:    {c.model.base_url}")
-        console.print(f"  API key:     {'***' + c.model.api_key[-4:] if c.has_api_key else '(not set)'}")
+        api_display = "***" + c.model.api_key[-4:] if c.has_api_key else "(not set)"
+        console.print(f"  API key:     {api_display}")
         console.print(f"  Max workers: {c.agent.max_workers}")
         console.print(f"  Temperature: {c.model.temperature}")
         return False
@@ -197,7 +198,10 @@ class CommandHandler:
         console.print()
         console.print("[bold]Session Usage Statistics[/bold]")
         console.print(f"  Duration:    {mins}m {secs}s")
-        console.print(f"  Requests:    {u.total_requests} total ({u.pro_requests} Pro, {u.flash_requests} Flash)")
+        console.print(
+            f"  Requests:    {u.total_requests} total"
+            f" ({u.pro_requests} Pro, {u.flash_requests} Flash)"
+        )
         console.print()
         console.print("  [bold blue]Pro (V4 Pro)[/bold blue]")
         console.print(f"    Prompt:     {u.pro_prompt_tokens:,} tokens")
@@ -208,7 +212,11 @@ class CommandHandler:
         console.print("  [bold green]Flash (V4 Flash)[/bold green]")
         console.print(f"    Prompt:     {u.flash_prompt_tokens:,} tokens")
         console.print(f"    Completion: {u.flash_completion_tokens:,} tokens")
-        flash_cost = u.estimated_cost("deepseek-v4-flash", u.flash_prompt_tokens, u.flash_completion_tokens)
+        flash_cost = u.estimated_cost(
+            "deepseek-v4-flash",
+            u.flash_prompt_tokens,
+            u.flash_completion_tokens,
+        )
         console.print(f"    Cost:       ${flash_cost:.4f}")
         console.print()
         console.print(f"  [bold]Total:       ${u.total_cost:.4f}[/bold]")
@@ -243,6 +251,7 @@ class CommandHandler:
             diff_text = "".join(diff)
             if diff_text:
                 from rich.syntax import Syntax
+
                 console.print(Syntax(diff_text, "diff", theme="monokai"))
             else:
                 console.print("  [dim](no changes)[/dim]")
@@ -304,7 +313,11 @@ class CommandHandler:
     async def _cmd_resume(self, name: str) -> bool:
         SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
         if not name.strip():
-            sessions = sorted(SESSIONS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+            sessions = sorted(
+                SESSIONS_DIR.glob("*.json"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
             if not sessions:
                 print_warning("No saved sessions found.")
                 return False
@@ -369,7 +382,8 @@ async def _ask_plan_approval(
     )
     loop = asyncio.get_event_loop()
     answer = await loop.run_in_executor(
-        None, lambda: input().strip().lower(),
+        None,
+        lambda: input().strip().lower(),
     )
     if answer in ("y", "yes", ""):
         return "yes"
@@ -382,7 +396,8 @@ async def _ask_plan_approval(
         )
         console.print("  [dim]> [/dim]", end="")
         edit_text = await loop.run_in_executor(
-            None, lambda: input().strip(),
+            None,
+            lambda: input().strip(),
         )
         if not edit_text:
             console.print(
@@ -393,12 +408,25 @@ async def _ask_plan_approval(
     return "yes"
 
 
-_INTERACTIVE_CMDS = frozenset({
-    "vim", "vi", "nvim", "nano", "emacs", "emacsclient",
-    "less", "more", "man",
-    "htop", "top", "btop",
-    "ssh", "tmux", "screen",
-})
+_INTERACTIVE_CMDS = frozenset(
+    {
+        "vim",
+        "vi",
+        "nvim",
+        "nano",
+        "emacs",
+        "emacsclient",
+        "less",
+        "more",
+        "man",
+        "htop",
+        "top",
+        "btop",
+        "ssh",
+        "tmux",
+        "screen",
+    }
+)
 
 
 def _is_interactive_command(command: str) -> bool:
@@ -575,6 +603,7 @@ def main() -> None:
 
     if "--version" in sys.argv:
         from deep_coder import __version__
+
         console.print(f"deep-coder {__version__}")
         return
 
@@ -592,6 +621,7 @@ def main() -> None:
             if idx + 1 < len(sys.argv):
                 host = sys.argv[idx + 1]
         from deep_coder.server import run_server
+
         run_server(config, host=host, port=port)
         return
 

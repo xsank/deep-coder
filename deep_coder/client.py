@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 import time
 from dataclasses import dataclass, field
@@ -72,8 +71,16 @@ class UsageStats:
 
     @property
     def total_cost(self) -> float:
-        pro_cost = self.estimated_cost("deepseek-v4-pro", self.pro_prompt_tokens, self.pro_completion_tokens)
-        flash_cost = self.estimated_cost("deepseek-v4-flash", self.flash_prompt_tokens, self.flash_completion_tokens)
+        pro_cost = self.estimated_cost(
+            "deepseek-v4-pro",
+            self.pro_prompt_tokens,
+            self.pro_completion_tokens,
+        )
+        flash_cost = self.estimated_cost(
+            "deepseek-v4-flash",
+            self.flash_prompt_tokens,
+            self.flash_completion_tokens,
+        )
         return pro_cost + flash_cost
 
     @property
@@ -123,7 +130,9 @@ class DeepSeekClient:
             "model": model,
             "messages": messages,
             "stream": stream,
-            "temperature": temperature if temperature is not None else self.config.model.temperature,
+            "temperature": (
+                temperature if temperature is not None else self.config.model.temperature
+            ),
             "max_tokens": max_tokens or self.config.model.max_tokens,
         }
         if tools:

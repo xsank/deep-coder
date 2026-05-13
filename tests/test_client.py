@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from deep_coder.config import Config, ModelConfig
 from deep_coder.client import DeepSeekClient
+from deep_coder.config import Config, ModelConfig
 from deep_coder.models import ModelRole
 
 

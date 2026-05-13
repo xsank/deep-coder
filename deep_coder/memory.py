@@ -107,7 +107,8 @@ class MemoryStore:
     def search(self, query: str) -> list[Memory]:
         q = query.lower()
         return [
-            m for m in self.list_all()
+            m
+            for m in self.list_all()
             if q in m.name.lower() or q in m.description.lower() or q in m.content.lower()
         ]
 
@@ -181,7 +182,9 @@ class MemoryStore:
         return path
 
     def _list_directory(
-        self, directory: Optional[Path], source: str = "local",
+        self,
+        directory: Optional[Path],
+        source: str = "local",
     ) -> list[Memory]:
         if not directory or not directory.is_dir():
             return []

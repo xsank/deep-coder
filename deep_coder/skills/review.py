@@ -41,7 +41,8 @@ class ReviewSkill(Skill):
                 f"3. **Error Handling** — Missing try/catch, unhandled edge cases\n"
                 f"4. **Performance** — Inefficient patterns, N+1 queries\n"
                 f"5. **Style** — Naming, structure, readability improvements\n\n"
-                f"For each finding, specify severity (critical/warning/suggestion) and the exact line(s). "
+                "For each finding, specify severity "
+                "(critical/warning/suggestion) and the exact line(s). "
                 f"If the code looks good, say so."
             )
         else:

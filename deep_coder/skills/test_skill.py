@@ -23,7 +23,12 @@ class TestSkill(Skill):
 
     def _detect_test_command(self, cwd: str) -> str | None:
         root = Path(cwd)
-        if (root / "pyproject.toml").exists() or (root / "setup.py").exists() or (root / "pytest.ini").exists():
+        has_pytest = (
+            (root / "pyproject.toml").exists()
+            or (root / "setup.py").exists()
+            or (root / "pytest.ini").exists()
+        )
+        if has_pytest:
             return "python -m pytest -v"
         if (root / "package.json").exists():
             return "npm test"
@@ -55,11 +60,13 @@ class TestSkill(Skill):
             print_success("All tests passed!")
             if output:
                 from deep_coder.display import console
+
                 console.print(f"\n[dim]{output[-2000:]}[/dim]\n")
             return
 
         print_warning(f"Tests failed (exit code {code}). Analyzing failures...")
         from deep_coder.display import console
+
         console.print(f"\n[dim]{output[-3000:]}[/dim]\n")
 
         prompt = (

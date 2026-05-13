@@ -8,7 +8,7 @@ import json
 import os
 import shutil
 import time
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from rich.console import Console, Group
 from rich.live import Live
@@ -21,24 +21,27 @@ from rich.theme import Theme
 if TYPE_CHECKING:
     from deep_coder.client import UsageStats
 
-THEME = Theme({
-    "info": "cyan",
-    "warning": "yellow",
-    "error": "bold red",
-    "success": "bold green",
-    "tool": "magenta",
-    "model.pro": "bold blue",
-    "model.flash": "bold green",
-    "dim": "dim white",
-})
+THEME = Theme(
+    {
+        "info": "cyan",
+        "warning": "yellow",
+        "error": "bold red",
+        "success": "bold green",
+        "tool": "magenta",
+        "model.pro": "bold blue",
+        "model.flash": "bold green",
+        "dim": "dim white",
+    }
+)
 
 console = Console(theme=THEME)
 
 
 def print_banner() -> None:
     """Print a geek-style cyberpunk splash screen for Deep Coder."""
-    from deep_coder import __version__
     import platform
+
+    from deep_coder import __version__
 
     term_w, _ = shutil.get_terminal_size((80, 24))
 
@@ -54,7 +57,7 @@ def print_banner() -> None:
 
     # ── ASCII art title ───────────────────────────────────────────────────────
     title = r"""
-   ██████╗ ███████╗███████╗██████╗      ██████╗ ██████╗ ██████╗ ███████╗██████╗ 
+   ██████╗ ███████╗███████╗██████╗      ██████╗ ██████╗ ██████╗ ███████╗██████╗
    ██╔══██╗██╔════╝██╔════╝██╔══██╗    ██╔════╝██╔═══██╗██╔══██╗██╔════╝██╔══██╗
    ██║  ██║█████╗  █████╗  ██████╔╝    ██║     ██║   ██║██║  ██║█████╗  ██████╔╝
    ██║  ██║██╔══╝  ██╔══╝  ██╔═══╝     ██║     ██║   ██║██║  ██║██╔══╝  ██╔══██╗
@@ -105,13 +108,16 @@ def _boot_sequence(__version__: str, platform, term_w: int) -> None:
         ("", 0.02),
         ("[bold yellow]  Initializing...[/]", 0.06),
         ("", 0.02),
-        (f"  [green]✓[/] Orchestrator Core   [dim]Pro V4[/]         [bold green]online[/]", 0.04),
-        (f"  [green]✓[/] Worker Swarm        [dim]Flash V4 ×5[/]    [bold green]online[/]", 0.04),
-        (f"  [green]✓[/] Tool Registry       [dim]19 tools[/]       [bold green]loaded[/]", 0.03),
-        (f"  [green]✓[/] Skill Registry      [dim]9 skills[/]       [bold green]loaded[/]", 0.03),
-        (f"  [green]✓[/] API Connection      [dim]deepseek.com[/]   [bold green]connected[/]", 0.04),
+        ("  [green]✓[/] Orchestrator Core   [dim]Pro V4[/]         [bold green]online[/]", 0.04),
+        ("  [green]✓[/] Worker Swarm        [dim]Flash V4 ×5[/]    [bold green]online[/]", 0.04),
+        ("  [green]✓[/] Tool Registry       [dim]19 tools[/]       [bold green]loaded[/]", 0.03),
+        ("  [green]✓[/] Skill Registry      [dim]9 skills[/]       [bold green]loaded[/]", 0.03),
+        ("  [green]✓[/] API Connection      [dim]deepseek.com[/]   [bold green]connected[/]", 0.04),
         ("", 0.03),
-        (f"  [bold green]Ready.[/]  [dim]{platform.system()} {platform.machine()}  ·  {sn}[/]", 0.05),
+        (
+            f"  [bold green]Ready.[/]  [dim]{platform.system()} {platform.machine()}  ·  {sn}[/]",
+            0.05,
+        ),
         ("", 0.04),
     ]
 
@@ -145,8 +151,18 @@ def _append_quickref(banner: Text) -> None:
     banner.append("\n\n")
 
     rows = [
-        [("/help", "commands"), ("/review", "AI review"), ("/commit", "commit msg"), ("/fix", "auto-fix")],
-        [("/think", "reasoning"), ("/explain", "explain"), ("/pr", "PR desc"), ("/test", "run tests")],
+        [
+            ("/help", "commands"),
+            ("/review", "AI review"),
+            ("/commit", "commit msg"),
+            ("/fix", "auto-fix"),
+        ],
+        [
+            ("/think", "reasoning"),
+            ("/explain", "explain"),
+            ("/pr", "PR desc"),
+            ("/test", "run tests"),
+        ],
         [("/remember", "save note"), ("/memory", "manage")],
     ]
 
@@ -187,14 +203,39 @@ def print_tool_call(tool_name: str, status: str = "calling") -> None:
 
 
 _EXT_TO_LEXER: dict[str, str] = {
-    ".py": "python", ".js": "javascript", ".ts": "typescript", ".tsx": "tsx",
-    ".jsx": "jsx", ".go": "go", ".rs": "rust", ".rb": "ruby", ".java": "java",
-    ".c": "c", ".cpp": "cpp", ".h": "cpp", ".cs": "csharp", ".swift": "swift",
-    ".kt": "kotlin", ".sh": "bash", ".zsh": "bash", ".fish": "fish",
-    ".json": "json", ".yaml": "yaml", ".yml": "yaml", ".toml": "toml",
-    ".xml": "xml", ".html": "html", ".css": "css", ".scss": "scss",
-    ".sql": "sql", ".md": "markdown", ".txt": "text", ".cfg": "ini",
-    ".ini": "ini", ".dockerfile": "dockerfile", ".lua": "lua",
+    ".py": "python",
+    ".js": "javascript",
+    ".ts": "typescript",
+    ".tsx": "tsx",
+    ".jsx": "jsx",
+    ".go": "go",
+    ".rs": "rust",
+    ".rb": "ruby",
+    ".java": "java",
+    ".c": "c",
+    ".cpp": "cpp",
+    ".h": "cpp",
+    ".cs": "csharp",
+    ".swift": "swift",
+    ".kt": "kotlin",
+    ".sh": "bash",
+    ".zsh": "bash",
+    ".fish": "fish",
+    ".json": "json",
+    ".yaml": "yaml",
+    ".yml": "yaml",
+    ".toml": "toml",
+    ".xml": "xml",
+    ".html": "html",
+    ".css": "css",
+    ".scss": "scss",
+    ".sql": "sql",
+    ".md": "markdown",
+    ".txt": "text",
+    ".cfg": "ini",
+    ".ini": "ini",
+    ".dockerfile": "dockerfile",
+    ".lua": "lua",
 }
 
 
@@ -223,8 +264,9 @@ def print_file_diff(
     old_lines = (old_content or "").splitlines(keepends=True)
     new_lines = (new_content or "").splitlines(keepends=True)
 
-    added = sum(1 for _ in difflib.unified_diff(old_lines, new_lines) if _.startswith("+") and not _.startswith("+++"))
-    removed = sum(1 for _ in difflib.unified_diff(old_lines, new_lines) if _.startswith("-") and not _.startswith("---"))
+    diff = list(difflib.unified_diff(old_lines, new_lines))
+    added = sum(1 for d in diff if d.startswith("+") and not d.startswith("+++"))
+    removed = sum(1 for d in diff if d.startswith("-") and not d.startswith("---"))
 
     summary_parts: list[str] = []
     if added:
@@ -443,7 +485,7 @@ class ReasoningStreamDisplay:
 
         tail = "".join(self._buffer)
         if len(tail) > self.MAX_DISPLAY_CHARS:
-            tail = "..." + tail[-self.MAX_DISPLAY_CHARS:]
+            tail = "..." + tail[-self.MAX_DISPLAY_CHARS :]
         if tail:
             display_lines = tail.strip().split("\n")
             for dl in display_lines[-3:]:
@@ -463,8 +505,10 @@ class ReasoningStreamDisplay:
     async def start(self) -> None:
         self._start = time.monotonic()
         self._live = Live(
-            self._render(), console=console,
-            refresh_per_second=4, transient=True,
+            self._render(),
+            console=console,
+            refresh_per_second=4,
+            transient=True,
         )
         self._live.start()
         self._timer_task = asyncio.create_task(self._timer_loop())
@@ -517,8 +561,12 @@ def summarize_tool_args(tool_name: str, arguments_json: str) -> str:
     except (json.JSONDecodeError, TypeError):
         return ""
     if tool_name in (
-        "read_file", "write_file", "edit_file",
-        "multi_edit_file", "insert_text", "delete_file",
+        "read_file",
+        "write_file",
+        "edit_file",
+        "multi_edit_file",
+        "insert_text",
+        "delete_file",
     ):
         return os.path.basename(args.get("file_path", ""))
     if tool_name == "move_file":
@@ -547,6 +595,7 @@ def summarize_tool_args(tool_name: str, arguments_json: str) -> str:
         return args.get("query", "")[:50]
     if tool_name == "web_fetch":
         from urllib.parse import urlparse
+
         url = args.get("url", "")
         parsed = urlparse(url)
         return parsed.netloc or url[:50]
@@ -554,7 +603,9 @@ def summarize_tool_args(tool_name: str, arguments_json: str) -> str:
 
 
 def summarize_tool_result(
-    tool_name: str, content: str, success: bool,
+    tool_name: str,
+    content: str,
+    success: bool,
 ) -> str:
     """Create a brief summary of a tool result for display."""
     if not success:
@@ -698,12 +749,14 @@ class TaskProgressDisplay:
         """Record a tool action for display. status: start|done|failed."""
         history = self._task_tool_history.setdefault(task_id, [])
         if status == "start":
-            history.append({
-                "tool": tool_name,
-                "args": args_summary,
-                "status": "running",
-                "result": "",
-            })
+            history.append(
+                {
+                    "tool": tool_name,
+                    "args": args_summary,
+                    "status": "running",
+                    "result": "",
+                }
+            )
         else:
             for entry in reversed(history):
                 if entry["tool"] == tool_name and entry["status"] == "running":
@@ -797,8 +850,7 @@ class TaskProgressDisplay:
                 n = len(history)
                 ts = f" ({n} tools)" if n > 0 else ""
                 console.print(
-                    f"    [green]✓[/green] [cyan]{tid}[/cyan]"
-                    f"  [green]done{ts}[/green]{task_time}",
+                    f"    [green]✓[/green] [cyan]{tid}[/cyan]  [green]done{ts}[/green]{task_time}",
                 )
             elif status == "failed":
                 detail = state.get("detail", "")
@@ -951,10 +1003,7 @@ class StreamPrinter:
         elapsed = time.monotonic() - self._start
         t = _format_elapsed(elapsed)
         color, model = _PHASE_STYLES.get(self._phase, ("cyan", ""))
-        detail_s = (
-            f"  [dim]{self._phase_detail}[/dim]"
-            if self._phase_detail else ""
-        )
+        detail_s = f"  [dim]{self._phase_detail}[/dim]" if self._phase_detail else ""
         console.print(
             f"\n  [{color}]●[/{color}] [bold]{self._phase.upper()}[/bold]"
             f" [dim]({model})[/dim]{detail_s}  [dim]{t}[/dim]"
@@ -985,7 +1034,7 @@ class StreamPrinter:
             pass
 
     def _get_pending(self) -> str:
-        return self.get_content()[self._committed_len:]
+        return self.get_content()[self._committed_len :]
 
     def _safe_to_flush(self) -> bool:
         pending = self._get_pending()
@@ -1092,10 +1141,7 @@ class StreamPrinter:
 
         pending = self._get_pending()
         term_h = shutil.get_terminal_size((80, 24)).lines
-        needs_flush = (
-            pending.count("\n") >= term_h - 8
-            or len(pending) > 3000
-        )
+        needs_flush = pending.count("\n") >= term_h - 8 or len(pending) > 3000
 
         if needs_flush:
             if self._safe_to_flush():
@@ -1116,9 +1162,7 @@ class StreamPrinter:
             )
             self._live.start()
             if self._phase and not self._header_committed:
-                self._streaming_timer = asyncio.create_task(
-                    self._streaming_timer_loop()
-                )
+                self._streaming_timer = asyncio.create_task(self._streaming_timer_loop())
         now = time.monotonic()
         if now - self._last_update >= self._UPDATE_INTERVAL:
             self._last_update = now

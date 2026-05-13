@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import fnmatch
-import os
 import re
 from pathlib import Path
 from typing import Any
@@ -11,12 +9,38 @@ from typing import Any
 from deep_coder.tools.base import Tool, ToolResult
 
 BINARY_EXTENSIONS = {
-    ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".svg",
-    ".pdf", ".zip", ".tar", ".gz", ".bz2", ".7z", ".rar",
-    ".exe", ".dll", ".so", ".dylib", ".o", ".a",
-    ".pyc", ".pyo", ".whl", ".egg",
-    ".mp3", ".mp4", ".avi", ".mov", ".wav",
-    ".sqlite", ".db", ".bin",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".bmp",
+    ".ico",
+    ".svg",
+    ".pdf",
+    ".zip",
+    ".tar",
+    ".gz",
+    ".bz2",
+    ".7z",
+    ".rar",
+    ".exe",
+    ".dll",
+    ".so",
+    ".dylib",
+    ".o",
+    ".a",
+    ".pyc",
+    ".pyo",
+    ".whl",
+    ".egg",
+    ".mp3",
+    ".mp4",
+    ".avi",
+    ".mov",
+    ".wav",
+    ".sqlite",
+    ".db",
+    ".bin",
 }
 
 
@@ -47,7 +71,9 @@ class GrepFilesTool(Tool):
                 },
                 "glob": {
                     "type": "string",
-                    "description": "Glob pattern to filter files (e.g., '*.py'). Default: all files.",
+                    "description": (
+                        "Glob pattern to filter files (e.g., '*.py'). Default: all files."
+                    ),
                 },
                 "case_insensitive": {
                     "type": "boolean",
@@ -105,7 +131,11 @@ class GrepFilesTool(Tool):
                 content = file_path.read_text(encoding="utf-8", errors="replace")
                 for lineno, line in enumerate(content.splitlines(), 1):
                     if regex.search(line):
-                        rel = file_path.relative_to(search_path) if search_path.is_dir() else file_path.name
+                        rel = (
+                            file_path.relative_to(search_path)
+                            if search_path.is_dir()
+                            else file_path.name
+                        )
                         matches.append(f"{rel}:{lineno}: {line.rstrip()}")
                         if len(matches) >= max_results:
                             break

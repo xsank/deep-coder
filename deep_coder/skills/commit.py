@@ -47,7 +47,13 @@ class CommitSkill(Skill):
 
         response = await ctx.client.collect_stream(
             messages=[
-                {"role": "system", "content": "You generate concise, precise git commit messages. Output only the message."},
+                {
+                    "role": "system",
+                    "content": (
+                        "You generate concise, precise git commit messages."
+                        " Output only the message."
+                    ),
+                },
                 {"role": "user", "content": prompt},
             ],
             model_role=ModelRole.FLASH,

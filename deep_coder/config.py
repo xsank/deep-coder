@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -15,7 +14,6 @@ else:
     import tomli as tomllib
 
 import tomli_w
-
 
 GLOBAL_CONFIG_DIR = Path.home() / ".deep-coder"
 GLOBAL_CONFIG_FILE = GLOBAL_CONFIG_DIR / "config.toml"

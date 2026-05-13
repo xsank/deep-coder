@@ -14,7 +14,8 @@ class _GitBaseTool(Tool):
 
     async def _run_git(self, *args: str, cwd: str | None = None) -> tuple[int, str, str]:
         proc = await asyncio.create_subprocess_exec(
-            "git", *args,
+            "git",
+            *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd or os.getcwd(),
@@ -161,7 +162,10 @@ class GitBranchTool(_GitBaseTool):
         return True
 
     async def execute(
-        self, create: str | None = None, delete: str | None = None, **_: Any,
+        self,
+        create: str | None = None,
+        delete: str | None = None,
+        **_: Any,
     ) -> ToolResult:
         if create:
             code, out, err = await self._run_git("checkout", "-b", create)

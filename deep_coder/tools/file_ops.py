@@ -43,7 +43,13 @@ class ReadFileTool(Tool):
     def is_read_only(self) -> bool:
         return True
 
-    async def execute(self, file_path: str, offset: int = 0, limit: int = 2000, **_: Any) -> ToolResult:
+    async def execute(
+        self,
+        file_path: str,
+        offset: int = 0,
+        limit: int = 2000,
+        **_: Any,
+    ) -> ToolResult:
         path = Path(file_path).expanduser().resolve()
         if not path.exists():
             return ToolResult.error(f"File not found: {path}")
@@ -285,7 +291,10 @@ class MoveFileTool(Tool):
         }
 
     async def execute(
-        self, source: str, destination: str, **_: Any,
+        self,
+        source: str,
+        destination: str,
+        **_: Any,
     ) -> ToolResult:
         src = Path(source).expanduser().resolve()
         dst = Path(destination).expanduser().resolve()
@@ -424,7 +433,11 @@ class InsertTextTool(Tool):
         }
 
     async def execute(
-        self, file_path: str, line: int, content: str, **_: Any,
+        self,
+        file_path: str,
+        line: int,
+        content: str,
+        **_: Any,
     ) -> ToolResult:
         path = Path(file_path).expanduser().resolve()
         if not path.exists():

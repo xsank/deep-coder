@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import json
-import os
-import shutil
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
@@ -66,6 +64,7 @@ class Tool(ABC):
 @dataclass
 class FileSnapshot:
     """Records a file's state before modification for undo support."""
+
     file_path: str
     original_content: Optional[str]
     existed: bool
@@ -120,7 +119,8 @@ class SnapshotTracker:
     @property
     def has_changes(self) -> bool:
         return any(
-            (Path(fp).read_text(encoding="utf-8", errors="replace") if Path(fp).exists() else None) != orig
+            (Path(fp).read_text(encoding="utf-8", errors="replace") if Path(fp).exists() else None)
+            != orig
             for fp, orig in self._modified_files.items()
         )
 
@@ -161,7 +161,9 @@ class ToolRegistry:
             result = await tool.execute(**kwargs)
             if resolved_path and result.success and not tool.is_read_only:
                 p = Path(resolved_path)
-                new_content = p.read_text(encoding="utf-8", errors="replace") if p.exists() else None
+                new_content = (
+                    p.read_text(encoding="utf-8", errors="replace") if p.exists() else None
+                )
                 if result.metadata is None:
                     result.metadata = {}
                 result.metadata["file_path"] = resolved_path

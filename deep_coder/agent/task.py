@@ -82,10 +82,7 @@ class Plan:
 
     @property
     def is_complete(self) -> bool:
-        return all(
-            t.status in (TaskStatus.COMPLETED, TaskStatus.FAILED)
-            for t in self.tasks
-        )
+        return all(t.status in (TaskStatus.COMPLETED, TaskStatus.FAILED) for t in self.tasks)
 
     @property
     def failed_tasks(self) -> list[Task]:
