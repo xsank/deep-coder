@@ -83,6 +83,7 @@ class RememberSkill(Skill):
             f"Remembered: {memory.name} ({memory.type.value}, {scope})"
         )
         console.print(f"  [dim]{path}[/dim]")
+        ctx.orchestrator.invalidate_prompt_cache()
 
     def _parse_response(self, content: str, original: str) -> dict[str, Any]:
         json_match = re.search(r"```json\s*(\{.*?\})\s*```", content, re.DOTALL)
@@ -134,7 +135,7 @@ class MemorySkill(Skill):
         elif sub == "search":
             self._cmd_search(store, sub_arg)
         elif sub in ("delete", "rm"):
-            await self._cmd_delete(store, sub_arg)
+            await self._cmd_delete(store, sub_arg, ctx)
         elif sub == "show":
             self._cmd_show(store, sub_arg)
         else:
@@ -202,7 +203,7 @@ class MemorySkill(Skill):
             border_style="cyan",
         ))
 
-    async def _cmd_delete(self, store: MemoryStore, memory_id: str) -> None:
+    async def _cmd_delete(self, store: MemoryStore, memory_id: str, ctx: SkillContext) -> None:
         if not memory_id:
             print_error("Provide a memory ID. Usage: /memory delete <id>")
             return
@@ -217,5 +218,6 @@ class MemorySkill(Skill):
         if answer.strip().lower() in ("y", "yes"):
             store.delete(memory_id)
             print_success(f"Deleted: {memory_id}")
+            ctx.orchestrator.invalidate_prompt_cache()
         else:
             print_info("Cancelled.")

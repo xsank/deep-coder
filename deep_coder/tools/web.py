@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import html
 import re
 from typing import Any
@@ -11,7 +12,10 @@ import httpx
 
 from deep_coder.tools.base import Tool, ToolResult
 
-_USER_AGENT = "Deep-Coder/1.0 (coding-assistant)"
+_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+)
 
 _SCRIPT_STYLE_RE = re.compile(
     r"<(script|style|noscript)[^>]*>.*?</\1>", re.DOTALL | re.IGNORECASE,
@@ -88,26 +92,33 @@ class WebSearchTool(Tool):
     async def execute(
         self,
         query: str,
-        max_results: int = 5,
+        max_results: int = 2,
         **_: Any,
     ) -> ToolResult:
         if not query.strip():
             return ToolResult.error("Empty search query.")
 
-        try:
-            async with httpx.AsyncClient(
-                timeout=15, follow_redirects=True,
-            ) as client:
-                resp = await client.post(
-                    "https://html.duckduckgo.com/html/",
-                    data={"q": query},
-                    headers={"User-Agent": _USER_AGENT},
-                )
-                resp.raise_for_status()
-        except httpx.TimeoutException:
-            return ToolResult.error("Search timed out.")
-        except httpx.HTTPError as e:
-            return ToolResult.error(f"Search failed: {e}")
+        last_err = ""
+        for attempt in range(3):
+            if attempt > 0:
+                await asyncio.sleep(1.5 * attempt)
+            try:
+                async with httpx.AsyncClient(
+                    timeout=20, follow_redirects=True,
+                ) as client:
+                    resp = await client.post(
+                        "https://html.duckduckgo.com/html/",
+                        data={"q": query},
+                        headers={"User-Agent": _USER_AGENT},
+                    )
+                    resp.raise_for_status()
+                break
+            except httpx.TimeoutException:
+                last_err = "Search timed out."
+            except httpx.HTTPError as e:
+                last_err = f"Search failed: {e}"
+        else:
+            return ToolResult.error(last_err)
 
         body = resp.text
         titles_urls = _DDG_RESULT_RE.findall(body)
@@ -186,19 +197,26 @@ class WebFetchTool(Tool):
             else:
                 return ToolResult.error(f"Unsupported URL scheme: {parsed.scheme}")
 
-        try:
-            async with httpx.AsyncClient(
-                timeout=20, follow_redirects=True,
-            ) as client:
-                resp = await client.get(
-                    url,
-                    headers={"User-Agent": _USER_AGENT},
-                )
-                resp.raise_for_status()
-        except httpx.TimeoutException:
-            return ToolResult.error(f"Fetch timed out: {url}")
-        except httpx.HTTPError as e:
-            return ToolResult.error(f"Fetch failed: {e}")
+        last_err = ""
+        for attempt in range(3):
+            if attempt > 0:
+                await asyncio.sleep(1.5 * attempt)
+            try:
+                async with httpx.AsyncClient(
+                    timeout=25, follow_redirects=True,
+                ) as client:
+                    resp = await client.get(
+                        url,
+                        headers={"User-Agent": _USER_AGENT},
+                    )
+                    resp.raise_for_status()
+                break
+            except httpx.TimeoutException:
+                last_err = f"Fetch timed out: {url}"
+            except httpx.HTTPError as e:
+                last_err = f"Fetch failed: {e}"
+        else:
+            return ToolResult.error(last_err)
 
         content_type = resp.headers.get("content-type", "")
         raw = resp.text

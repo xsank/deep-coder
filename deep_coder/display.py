@@ -7,7 +7,6 @@ import difflib
 import json
 import os
 import shutil
-import sys
 import time
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -15,7 +14,6 @@ from rich.console import Console, Group
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
-from rich.spinner import Spinner
 from rich.syntax import Syntax
 from rich.text import Text
 from rich.theme import Theme
@@ -419,11 +417,12 @@ class PhaseSpinner:
 
 
 class ReasoningStreamDisplay:
-    """Shows reasoning tokens in real-time during planning phase with elapsed timer."""
+    """Shows reasoning tokens in real-time with elapsed timer."""
 
     MAX_DISPLAY_CHARS = 200
 
-    def __init__(self) -> None:
+    def __init__(self, phase: str = "planning") -> None:
+        self._phase = phase
         self._start = 0.0
         self._buffer: list[str] = []
         self._total_chars = 0
@@ -433,12 +432,12 @@ class ReasoningStreamDisplay:
     def _render(self) -> Text:
         elapsed = time.monotonic() - self._start
         t = _format_elapsed(elapsed)
-        color, model = _PHASE_STYLES.get("planning", ("blue", "Pro"))
+        color, model = _PHASE_STYLES.get(self._phase, ("cyan", "Pro"))
 
         line = Text()
         line.append("\n  ")
         line.append("●", style=color)
-        line.append(" PLANNING", style="bold")
+        line.append(f" {self._phase.upper()}", style="bold")
         line.append(f" ({model})", style="dim")
         line.append(f"  {t}", style="dim")
 
@@ -491,10 +490,10 @@ class ReasoningStreamDisplay:
             self._live = None
         elapsed = time.monotonic() - self._start
         t = _format_elapsed(elapsed)
-        color, model = _PHASE_STYLES.get("planning", ("blue", "Pro"))
+        color, model = _PHASE_STYLES.get(self._phase, ("cyan", "Pro"))
         int_s = " [yellow]interrupted[/yellow]" if interrupted else ""
         console.print(
-            f"\n  [{color}]●[/{color}] [bold]PLANNING[/bold]"
+            f"\n  [{color}]●[/{color}] [bold]{self._phase.upper()}[/bold]"
             f" [dim]({model})[/dim]  [dim]{t}[/dim]{int_s}"
         )
 
@@ -877,6 +876,7 @@ class StreamPrinter:
         status_panel: StatusPanel | None = None,
         phase: str = "",
         phase_detail: str = "",
+        skip_spinner: bool = False,
     ) -> None:
         self._buffer: list[str] = []
         self._status_panel = status_panel
@@ -891,8 +891,10 @@ class StreamPrinter:
         self._phase_timer: asyncio.Task[None] | None = None
         self._header_committed = False
         self._streaming_timer: asyncio.Task[None] | None = None
-        if phase:
+        if phase and not skip_spinner:
             self._start_phase()
+        elif phase:
+            self._start = time.monotonic()
 
     def _render_phase(self) -> Text:
         color, model = _PHASE_STYLES.get(self._phase, ("cyan", ""))
@@ -987,30 +989,72 @@ class StreamPrinter:
 
     def _safe_to_flush(self) -> bool:
         pending = self._get_pending()
-        if pending.count("```") % 2 != 0:
+        if not pending.rstrip(" \t").endswith("\n"):
             return False
-        return pending.rstrip(" \t").endswith("\n")
+        return not self._has_open_fence(pending)
+
+    @staticmethod
+    def _has_open_fence(text: str) -> bool:
+        in_fence = False
+        fence_char = ""
+        fence_len = 0
+        for line in text.split("\n"):
+            stripped = line.lstrip(" ")
+            indent = len(line) - len(stripped)
+            if indent > 3:
+                continue
+            if not in_fence:
+                if stripped.startswith("```") or stripped.startswith("~~~"):
+                    in_fence = True
+                    fence_char = stripped[0]
+                    fence_len = 0
+                    for ch in stripped:
+                        if ch == fence_char:
+                            fence_len += 1
+                        else:
+                            break
+            else:
+                if stripped.startswith(fence_char * fence_len):
+                    rest = stripped[fence_len:].strip()
+                    if not rest:
+                        in_fence = False
+        return in_fence
 
     def _find_safe_split(self, pending: str) -> int:
-        """Find split point before the last unclosed code fence.
-
-        Returns character offset in pending, or 0 if no safe point.
-        """
-        positions: list[int] = []
-        i = 0
-        while i < len(pending):
-            if pending[i:i + 3] == "```":
-                positions.append(i)
-                i += 3
-            else:
-                i += 1
-        if not positions or len(positions) % 2 == 0:
-            return 0
-        fence_start = positions[-1]
-        if fence_start == 0:
-            return 0
-        split = pending.rfind("\n", 0, fence_start)
-        return split + 1 if split >= 0 else 0
+        in_fence = False
+        fence_char = ""
+        fence_len = 0
+        last_safe = 0
+        pos = 0
+        for line in pending.split("\n"):
+            line_end = pos + len(line) + 1
+            stripped = line.lstrip(" ")
+            indent = len(line) - len(stripped)
+            if indent <= 3:
+                if not in_fence:
+                    if stripped.startswith("```") or stripped.startswith("~~~"):
+                        in_fence = True
+                        fence_char = stripped[0]
+                        fence_len = 0
+                        for ch in stripped:
+                            if ch == fence_char:
+                                fence_len += 1
+                            else:
+                                break
+                    else:
+                        last_safe = line_end
+                else:
+                    if stripped.startswith(fence_char * fence_len):
+                        rest = stripped[fence_len:].strip()
+                        if not rest:
+                            in_fence = False
+                            last_safe = line_end
+            elif not in_fence:
+                last_safe = line_end
+            pos = line_end
+        if in_fence and last_safe > 0:
+            return last_safe
+        return 0
 
     def _flush_partial(self, n: int) -> None:
         """Flush the first *n* characters of pending content."""
@@ -1105,51 +1149,10 @@ class StreamPrinter:
 
 
 class StatusPanel:
-    """Floating top-right panel showing real-time token usage and cost."""
-
-    PANEL_WIDTH = 26
-    PANEL_HEIGHT = 5
-    THROTTLE_INTERVAL = 1.0
+    """Token usage tracker (no longer renders an overlay)."""
 
     def __init__(self, usage: UsageStats) -> None:
         self._usage = usage
-        self._last_render: float = 0.0
 
     def refresh(self, force: bool = False) -> None:
-        now = time.monotonic()
-        if not force and (now - self._last_render) < self.THROTTLE_INTERVAL:
-            return
-        self._last_render = now
-        self._render()
-
-    def _render(self) -> None:
-        cols, _ = shutil.get_terminal_size((80, 24))
-        if cols < self.PANEL_WIDTH + 4:
-            return
-
-        u = self._usage
-        pro_tokens = u.pro_prompt_tokens + u.pro_completion_tokens
-        flash_tokens = u.flash_prompt_tokens + u.flash_completion_tokens
-        total_tokens = pro_tokens + flash_tokens
-        pro_cost = u.estimated_cost("deepseek-v4-pro", u.pro_prompt_tokens, u.pro_completion_tokens)
-        flash_cost = u.estimated_cost("deepseek-v4-flash", u.flash_prompt_tokens, u.flash_completion_tokens)
-        total_cost = pro_cost + flash_cost
-
-        w = self.PANEL_WIDTH
-        inner = w - 2
-        col_start = cols - w
-
-        lines = [
-            "┌─ Cost " + "─" * (inner - 7) + "┐",
-            f"│ {'Pro':6s} {pro_tokens:>7,}  ${pro_cost:>.3f} │",
-            f"│ {'Flash':6s} {flash_tokens:>7,}  ${flash_cost:>.3f} │",
-            f"│ {'Total':6s} {total_tokens:>7,}  ${total_cost:>.3f} │",
-            "└" + "─" * inner + "┘",
-        ]
-
-        out = sys.stdout
-        out.write("\0337")  # save cursor
-        for i, line in enumerate(lines):
-            out.write(f"\033[{i + 1};{col_start + 1}H{line}")
-        out.write("\0338")  # restore cursor
-        out.flush()
+        pass

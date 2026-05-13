@@ -59,6 +59,8 @@ class Worker:
         on_approve: OnApprove = None,
         on_tool_action: OnToolAction = None,
         conversation_summary: str = "",
+        cached_coder_md: Any = None,
+        cached_memories: Any = None,
     ) -> str:
         task.mark_running()
         if on_status:
@@ -66,9 +68,15 @@ class Worker:
         if on_worker_status:
             await on_worker_status(task.id, "running", "starting")
 
+        prompt_kwargs: dict[str, Any] = {}
+        if cached_coder_md is not None:
+            prompt_kwargs["cached_coder_md"] = cached_coder_md
+        if cached_memories is not None:
+            prompt_kwargs["cached_memories"] = cached_memories
         system_prompt = get_worker_prompt(
             task.description, task.context,
             cwd=self._cwd, conversation_summary=conversation_summary,
+            **prompt_kwargs,
         )
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},

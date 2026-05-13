@@ -12,7 +12,6 @@ from deep_coder.agent.worker import OnApprove, Worker
 from deep_coder.client import DeepSeekClient, strip_dsml
 from deep_coder.config import Config
 from deep_coder.display import (
-    PhaseSpinner,
     ReasoningStreamDisplay,
     TaskProgressDisplay,
     console,
@@ -53,10 +52,23 @@ class Orchestrator:
         self._on_approve: OnApprove = None
         self._on_plan_approval: OnPlanApproval = None
         self._plan_revision_depth = 0
+        self._prompt_cache_loaded = False
+        self._cached_coder_md: str | None = None
+        self._cached_memories: str | None = None
 
     def set_cwd(self, cwd: str) -> None:
         self._cwd = cwd
         self.worker.set_cwd(cwd)
+
+    def _ensure_prompt_cache(self) -> None:
+        if not self._prompt_cache_loaded:
+            from deep_coder.prompts.system import _find_coder_md, _load_memories
+            self._cached_coder_md = _find_coder_md(self._cwd)
+            self._cached_memories = _load_memories(self._cwd)
+            self._prompt_cache_loaded = True
+
+    def invalidate_prompt_cache(self) -> None:
+        self._prompt_cache_loaded = False
 
     def set_approve_handler(self, handler: OnApprove) -> None:
         self._on_approve = handler
@@ -113,7 +125,12 @@ class Orchestrator:
         from deep_coder.context import collect_project_context
         project_ctx = await collect_project_context(self._cwd)
 
-        system_prompt = get_orchestrator_prompt(self._cwd, project_context=project_ctx)
+        self._ensure_prompt_cache()
+        system_prompt = get_orchestrator_prompt(
+            self._cwd, project_context=project_ctx,
+            cached_coder_md=self._cached_coder_md,
+            cached_memories=self._cached_memories,
+        )
         messages = [{"role": "system", "content": system_prompt}] + self.conversation
 
         reasoning_display = ReasoningStreamDisplay()
@@ -133,6 +150,8 @@ class Orchestrator:
         content = strip_dsml(response.get("content") or "")
 
         plan = self._try_extract_plan(content)
+        if not plan and len(content) > 100:
+            plan = await self._retry_for_plan(content, system_prompt)
         if plan and len(plan.tasks) > 0:
             plan_tasks_info = [
                 {"id": t.id, "desc": t.description[:128] + ("..." if len(t.description) > 128 else ""), "deps": t.depends_on}
@@ -208,6 +227,32 @@ class Orchestrator:
             pass
         return None
 
+    async def _retry_for_plan(
+        self, first_response: str, system_prompt: str,
+    ) -> Optional[Plan]:
+        """Re-prompt the Pro model to produce a JSON task plan."""
+        retry_msg = (
+            "Your response did not include a JSON task plan. "
+            "You MUST delegate to workers — you cannot read files, "
+            "write code, or run commands yourself.\n\n"
+            "Re-analyze the user's request and output a task plan in "
+            "```json format with {\"plan\": \"...\", \"tasks\": [...]}."
+        )
+        messages = (
+            [{"role": "system", "content": system_prompt}]
+            + self.conversation
+            + [
+                {"role": "assistant", "content": first_response},
+                {"role": "user", "content": retry_msg},
+            ]
+        )
+        response = await self.client.collect_stream(
+            messages=messages,
+            model_role=ModelRole.PRO,
+        )
+        content = strip_dsml(response.get("content") or "")
+        return self._try_extract_plan(content)
+
     def _build_conversation_summary(self, max_exchanges: int = 20) -> str:
         """Build a compact summary of recent conversation for worker context."""
         recent = self.conversation[-(max_exchanges * 2):]
@@ -252,6 +297,9 @@ class Orchestrator:
                 status, result_brief,
             )
 
+        self._ensure_prompt_cache()
+        conv_summary = self._build_conversation_summary()
+
         try:
             while not plan.is_complete:
                 ready = plan.get_ready_tasks()
@@ -274,6 +322,7 @@ class Orchestrator:
                         task, on_worker_status=on_worker_status,
                         on_approve=on_approve_with_pause,
                         on_tool_action=on_tool_action,
+                        conversation_summary=conv_summary,
                     )
                     for task in batch
                 ]
@@ -290,6 +339,7 @@ class Orchestrator:
                         task, on_worker_status=on_worker_status,
                         on_approve=on_approve_with_pause,
                         on_tool_action=on_tool_action,
+                        conversation_summary=conv_summary,
                     )
                     for task in failed_tasks
                 ]
@@ -314,6 +364,7 @@ class Orchestrator:
         on_worker_status: Any = None,
         on_approve: OnApprove = None,
         on_tool_action: Any = None,
+        conversation_summary: str = "",
     ) -> None:
         try:
             await self.worker.execute(
@@ -322,7 +373,9 @@ class Orchestrator:
                 on_worker_status=on_worker_status,
                 on_approve=on_approve or self._on_approve,
                 on_tool_action=on_tool_action,
-                conversation_summary=self._build_conversation_summary(),
+                conversation_summary=conversation_summary,
+                cached_coder_md=self._cached_coder_md,
+                cached_memories=self._cached_memories,
             )
         except Exception as e:
             task.mark_failed(str(e))
@@ -467,14 +520,14 @@ class Orchestrator:
         buffer: list[str] = []
         verdict_found = False
         report_printer: StreamPrinter | None = None
-        spinner = PhaseSpinner("verifying", "reviewing results")
-        spinner_stopped = False
+        reasoning_display = ReasoningStreamDisplay(phase="verifying")
+        reasoning_stopped = False
 
-        async def stop_spinner() -> None:
-            nonlocal spinner_stopped
-            if not spinner_stopped:
-                spinner_stopped = True
-                await spinner.__aexit__(None, None, None)
+        async def stop_reasoning() -> None:
+            nonlocal reasoning_stopped
+            if not reasoning_stopped:
+                reasoning_stopped = True
+                await reasoning_display.stop()
 
         async def on_token(token: str) -> None:
             nonlocal verdict_found, report_printer
@@ -507,32 +560,41 @@ class Orchestrator:
 
             verdict_found = True
             if v["status"] == "complete":
-                await stop_spinner()
+                await stop_reasoning()
                 report_printer = StreamPrinter(
                     phase="reporting",
                     phase_detail="generating report",
+                    skip_spinner=True,
                 )
                 rest = text[match.end():].lstrip("\n")
                 if rest:
                     await report_printer.on_token(rest)
 
-        await spinner.__aenter__()
+        self._ensure_prompt_cache()
+        sys_prompt = get_orchestrator_prompt(
+            self._cwd,
+            cached_coder_md=self._cached_coder_md,
+            cached_memories=self._cached_memories,
+        )
+
+        await reasoning_display.start()
         try:
             await self.client.collect_stream(
                 messages=[
-                    {"role": "system", "content": get_orchestrator_prompt(self._cwd)},
+                    {"role": "system", "content": sys_prompt},
                     {"role": "user", "content": prompt},
                 ],
                 model_role=ModelRole.PRO,
                 on_token=on_token,
+                on_reasoning=reasoning_display.on_reasoning,
             )
         except (KeyboardInterrupt, asyncio.CancelledError):
-            await stop_spinner()
+            await stop_reasoning()
             if report_printer:
                 report_printer.finish()
             raise
 
-        await stop_spinner()
+        await stop_reasoning()
         if report_printer:
             report_printer.finish()
 
@@ -570,12 +632,18 @@ class Orchestrator:
             "Max iterations reached. Provide a final report summarizing "
             "what was accomplished and what remains incomplete."
         )
+        self._ensure_prompt_cache()
+        sys_prompt = get_orchestrator_prompt(
+            self._cwd,
+            cached_coder_md=self._cached_coder_md,
+            cached_memories=self._cached_memories,
+        )
         printer = StreamPrinter(
             phase="reporting", phase_detail="final report",
         )
         response = await self.client.collect_stream(
             messages=[
-                {"role": "system", "content": get_orchestrator_prompt(self._cwd)},
+                {"role": "system", "content": sys_prompt},
                 {"role": "user", "content": prompt},
             ],
             model_role=ModelRole.PRO,
@@ -628,3 +696,4 @@ class Orchestrator:
 
     def clear_history(self) -> None:
         self.conversation.clear()
+        self.invalidate_prompt_cache()

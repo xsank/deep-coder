@@ -11,6 +11,8 @@ PROMPTS_DIR = Path(__file__).parent
 MAX_CODER_MD_CHARS = 10000
 MAX_MEMORY_CHARS = 10000
 
+_UNSET = object()
+
 
 def load_prompt(name: str) -> str:
     path = PROMPTS_DIR / f"{name}.txt"
@@ -46,21 +48,24 @@ def _load_memories(cwd: str | None) -> str | None:
 def get_orchestrator_prompt(
     cwd: str | None = None,
     project_context: Any = None,
+    *,
+    cached_coder_md: Any = _UNSET,
+    cached_memories: Any = _UNSET,
 ) -> str:
     base = load_prompt("orchestrator")
     context_parts = [base]
+    cm = cached_coder_md if cached_coder_md is not _UNSET else _find_coder_md(cwd)
+    if cm:
+        context_parts.append(f"\n## Project Context (CODER.md)\n{cm}")
+    mem = cached_memories if cached_memories is not _UNSET else _load_memories(cwd)
+    if mem:
+        context_parts.append(f"\n## User Memories\n{mem}")
     if cwd:
         context_parts.append(f"\n## Current Working Directory\n{cwd}")
     if project_context:
         context_parts.append(
             f"\n## Project Status\n{project_context.format_for_prompt()}"
         )
-    coder_md = _find_coder_md(cwd)
-    if coder_md:
-        context_parts.append(f"\n## Project Context (CODER.md)\n{coder_md}")
-    memory_section = _load_memories(cwd)
-    if memory_section:
-        context_parts.append(f"\n## User Memories\n{memory_section}")
     return "\n".join(context_parts)
 
 
@@ -69,17 +74,21 @@ def get_worker_prompt(
     task_context: str = "",
     cwd: str | None = None,
     conversation_summary: str = "",
+    *,
+    cached_coder_md: Any = _UNSET,
+    cached_memories: Any = _UNSET,
 ) -> str:
     base = load_prompt("worker")
-    parts = [base, f"\n## Your Assigned Task\n{task_description}"]
-    if task_context:
-        parts.append(f"\n## Additional Context\n{task_context}")
+    parts = [base]
+    cm = cached_coder_md if cached_coder_md is not _UNSET else _find_coder_md(cwd)
+    if cm:
+        parts.append(f"\n## Project Context (CODER.md)\n{cm}")
+    mem = cached_memories if cached_memories is not _UNSET else _load_memories(cwd)
+    if mem:
+        parts.append(f"\n## User Memories\n{mem}")
     if conversation_summary:
         parts.append(f"\n## Conversation Context\n{conversation_summary}")
-    coder_md = _find_coder_md(cwd)
-    if coder_md:
-        parts.append(f"\n## Project Context (CODER.md)\n{coder_md}")
-    memory_section = _load_memories(cwd)
-    if memory_section:
-        parts.append(f"\n## User Memories\n{memory_section}")
+    parts.append(f"\n## Your Assigned Task\n{task_description}")
+    if task_context:
+        parts.append(f"\n## Additional Context\n{task_context}")
     return "\n".join(parts)
