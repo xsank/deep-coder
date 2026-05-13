@@ -25,5 +25,14 @@ jobs:
       - name: Lint
         run: ruff check deep_coder/ tests/
 
-      - name: Test
-        run: pytest tests/ -q
+      - name: Test with coverage
+        run: pytest --cov --cov-report=xml -q
+
+      - name: Upload coverage
+        if: matrix.python-version == '3.12'
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage.xml
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
